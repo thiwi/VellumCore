@@ -1,0 +1,15 @@
+{
+  "circuit_id": "credit_check",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "credit_score": { "type": "integer", "minimum": 0, "maximum": 900 },
+      "debt_ratio": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+    },
+    "required": ["credit_score", "debt_ratio"],
+    "additionalProperties": false
+  },
+  "public_signals": ["risk_score"],
+  "version": "1.0.0"
+}
+

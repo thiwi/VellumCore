@@ -1,0 +1,124 @@
+services:
+  prover:
+    build:
+      context: .
+      dockerfile: Dockerfile.prover
+    image: sentinel-zk/prover:dev
+    environment:
+      APP_NAME: sentinel-zk-prover
+      CIRCUITS_DIR: /app/circuits
+      SHARED_ASSETS_DIR: /shared_assets
+      PROOF_STORE_FILE: /shared_store/proof_audit.jsonl
+      PROOF_OUTPUT_DIR: /shared_assets/proofs
+      SNARKJS_BIN: snarkjs
+      JWT_ISSUER: bank.local
+      JWT_AUDIENCE: sentinel-zk
+      JWT_PUBLIC_KEY_PATH: /app/config/jwt_public.pem
+      BANK_PUBLIC_KEYS_PATH: /app/config/bank_public_keys.json
+      AUDIT_PRIVATE_KEY_PATH: /app/config/audit_private.pem
+      AUDIT_PUBLIC_KEY_PATH: /app/config/audit_public.pem
+      NONCE_WINDOW_SECONDS: 300
+      PROVER_MAX_PARALLEL_PROOFS: 2
+    volumes:
+      - ./circuits:/app/circuits:ro
+      - ./config:/app/config:ro
+      - shared_assets:/shared_assets
+      - shared_store:/shared_store
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  verifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.verifier
+    image: sentinel-zk/verifier:dev
+    environment:
+      APP_NAME: sentinel-zk-verifier
+      CIRCUITS_DIR: /app/circuits
+      SHARED_ASSETS_DIR: /shared_assets
+      PROOF_STORE_FILE: /shared_store/proof_audit.jsonl
+      SNARKJS_BIN: snarkjs
+      JWT_ISSUER: bank.local
+      JWT_AUDIENCE: sentinel-zk
+      JWT_PUBLIC_KEY_PATH: /app/config/jwt_public.pem
+      BANK_PUBLIC_KEYS_PATH: /app/config/bank_public_keys.json
+      AUDIT_PRIVATE_KEY_PATH: /app/config/audit_private.pem
+      AUDIT_PUBLIC_KEY_PATH: /app/config/audit_public.pem
+      NONCE_WINDOW_SECONDS: 300
+    volumes:
+      - ./circuits:/app/circuits:ro
+      - ./config:/app/config:ro
+      - shared_assets:/shared_assets
+      - shared_store:/shared_store
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    image: sentinel-zk/dashboard:dev
+    environment:
+      PROVER_URL: http://prover:8001
+      VERIFIER_URL: http://verifier:8002
+      JWT_ISSUER: bank.local
+      JWT_AUDIENCE: sentinel-zk
+      BANK_KEY_ID: bank-key-1
+      JWT_PRIVATE_KEY_PATH: /app/config/dev_jwt_private.pem
+      BANK_PRIVATE_KEY_PATH: /app/config/dev_bank_private.pem
+      CIRCUITS_DIR: /app/circuits
+    depends_on:
+      prover:
+        condition: service_healthy
+      verifier:
+        condition: service_healthy
+    volumes:
+      - ./circuits:/app/circuits:ro
+      - ./config:/app/config:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  stress_tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.stress
+    image: sentinel-zk/stress-tester:dev
+    profiles: ["stress"]
+    environment:
+      PROVER_URL: http://prover:8001
+      JWT_ISSUER: bank.local
+      JWT_AUDIENCE: sentinel-zk
+      BANK_KEY_ID: bank-key-1
+      JWT_PRIVATE_KEY_PATH: /app/config/dev_jwt_private.pem
+      BANK_PRIVATE_KEY_PATH: /app/config/dev_bank_private.pem
+    depends_on:
+      prover:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+      - ./stress_results:/app/stress_results
+      - ${DOCKER_SOCK_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    command: ["python", "/app/stress_tester.py", "--output", "/app/stress_results/stress_report.json"]
+    restart: "no"
+
+volumes:
+  shared_assets:
+  shared_store:

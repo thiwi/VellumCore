@@ -1,0 +1,41 @@
+FROM rust:1.78-bullseye AS circom-builder
+RUN cargo install --locked --git https://github.com/iden3/circom.git --tag v2.1.8 circom
+
+FROM node:bullseye-slim AS node-tools
+RUN npm install -g snarkjs@0.7.5 circomlib@2.0.5
+
+FROM python:3.10-slim-bullseye AS runtime
+ARG TARGETARCH
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libatomic1 \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=circom-builder /usr/local/cargo/bin/circom /usr/local/bin/circom
+RUN ln -sf /usr/local/lib/node_modules/snarkjs/build/cli.cjs /usr/local/bin/snarkjs \
+    && chmod +x /usr/local/lib/node_modules/snarkjs/build/cli.cjs
+
+WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY sentinel_zk /app/sentinel_zk
+COPY prover_service.py /app/prover_service.py
+COPY benchmark_comparison.py /app/benchmark_comparison.py
+COPY benchmark_batch.py /app/benchmark_batch.py
+COPY setup_framework.sh /app/setup_framework.sh
+COPY circuits /app/circuits
+COPY config /app/config
+
+RUN chmod +x /app/setup_framework.sh && mkdir -p /shared_assets /shared_store
+
+EXPOSE 8001
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "prover_service:app", "--host", "0.0.0.0", "--port", "8001"]

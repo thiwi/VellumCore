@@ -1,0 +1,23 @@
+FROM python:3.10-slim-bullseye AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY sentinel_zk /app/sentinel_zk
+COPY dashboard_service.py /app/dashboard_service.py
+COPY circuits /app/circuits
+COPY config /app/config
+
+EXPOSE 8000
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "dashboard_service:app", "--host", "0.0.0.0", "--port", "8000"]
+

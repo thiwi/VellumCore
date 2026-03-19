@@ -1,0 +1,14 @@
+{
+  "circuit_id": "complexity_1k",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "seed": { "type": "integer", "minimum": 1, "maximum": 9 }
+    },
+    "required": ["seed"],
+    "additionalProperties": false
+  },
+  "public_signals": ["digest"],
+  "version": "1.0.0"
+}
+

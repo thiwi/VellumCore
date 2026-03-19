@@ -1,0 +1,34 @@
+FROM node:bullseye-slim AS node-tools
+RUN npm install -g snarkjs@0.7.5
+
+FROM python:3.10-slim-bullseye AS runtime
+ARG TARGETARCH
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libatomic1 \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/snarkjs/build/cli.cjs /usr/local/bin/snarkjs \
+    && chmod +x /usr/local/lib/node_modules/snarkjs/build/cli.cjs
+
+WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY sentinel_zk /app/sentinel_zk
+COPY verifier_service.py /app/verifier_service.py
+COPY circuits /app/circuits
+COPY config /app/config
+
+RUN mkdir -p /shared_assets /shared_store
+
+EXPOSE 8002
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "verifier_service:app", "--host", "0.0.0.0", "--port", "8002"]

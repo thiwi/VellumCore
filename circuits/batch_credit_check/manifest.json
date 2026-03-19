@@ -1,0 +1,25 @@
+{
+  "circuit_id": "batch_credit_check",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "balances": {
+        "type": "array",
+        "minItems": 100,
+        "maxItems": 100,
+        "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      },
+      "limits": {
+        "type": "array",
+        "minItems": 100,
+        "maxItems": 100,
+        "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      },
+      "active_count": { "type": "integer", "minimum": 1, "maximum": 100 }
+    },
+    "required": ["balances", "limits", "active_count"],
+    "additionalProperties": false
+  },
+  "public_signals": ["all_valid", "active_count_out", "limits", "active_count"],
+  "version": "1.0.0"
+}
