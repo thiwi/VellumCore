@@ -1,65 +1,76 @@
-# Sentinel-ZK Core
+# Vellum Protocol Core
 
-Modular local-first framework for proving and verifying Circom/SnarkJS proofs with:
-- dynamic circuit registry
-- pluggable ZK provider abstraction
-- JWT + signed-request handshake
-- append-only audit log with signed hash-chain links
-- interactive dashboard GUI for live demo flows
-- 100-decision batch proving endpoint for credit decisions
-- stress testing harness for proving latency and resource pressure
-- Docker Compose deployment for `linux/amd64` and `linux/arm64`
+Production-oriented ZK proving/verification framework with:
+- package namespace `vellum_core` (hard rename from `sentinel_zk`)
+- batch-first proving (`batch_credit_check`, N=100)
+- distributed proving (FastAPI orchestrator + Redis/Celery worker)
+- Vault Transit signing for JWT, bank-handshake, and audit-chain links
+- PostgreSQL system-of-record for proof jobs and append-only audit chain
+- Prometheus metrics + dashboard trust-speed view
+- Docker Compose runtime for `linux/amd64` and `linux/arm64`
 
-## Project Layout
+## Services
 
-- `prover_service.py`: async proof job API (`POST /v1/proofs`, `POST /v1/proofs/batch`, `GET /v1/proofs/{proof_id}`)
-- `verifier_service.py`: verification API (`POST /v1/verify`) + audit chain verifier (`GET /v1/audit/verify-chain`)
-- `sentinel_zk/registry.py`: dynamic circuit discovery from `/circuits/<circuit_id>/manifest.json`
-- `sentinel_zk/providers/`: provider interface + `SnarkJSProvider`
-- `sentinel_zk/proof_store.py`: JSONL proof/audit store with signed chain links
-- `circuits/library/banking_library.circom`: reusable `RangeProof32`, `MerkleInclusionPoseidonDepth10`, `FixedPoint*`
-- `circuits/batch_credit_check/`: canonical batch circuit (`BatchCreditCheck(100)`)
-- `benchmark_comparison.py`: native vs ZK verification benchmark utility
-- `benchmark_batch.py`: 100-decision native-vs-single-batch-verify showdown
-- `stress_tester.py`: prover saturation harness with latency/CPU/RSS metrics
-- `setup_framework.sh`: compiles all runnable manifest-backed circuits and generates Groth16 artifacts
+- `prover_service.py`: thin API orchestrator
+  - `POST /v1/proofs/batch`
+  - `GET /v1/proofs/{proof_id}`
+  - `GET /metrics`
+- `worker.py`: Celery worker doing SnarkJS proving
+- `verifier_service.py`: proof verifier + integrity service
+  - `POST /v1/verify`
+  - `GET /v1/audit/verify-chain`
+  - `GET /v1/trust-speed`
+  - `GET /metrics`
+- `dashboard_service.py`: demo UI for batch prove/verify + trust-speed
 
-## Circuit Structure
+Infrastructure in `docker-compose.yml`:
+- `postgres`
+- `redis`
+- `vault`
+- `vault-init` (creates transit keys)
+- `prover`
+- `worker`
+- `verifier`
+- `dashboard`
 
-Each circuit must be placed in:
+## Architecture Notes
 
-```text
-circuits/<circuit_id>/
-  <circuit_id>.circom
-  manifest.json
-```
+- Prover API no longer executes heavy proofs locally.
+- Proof jobs are written to Postgres (`queued`) and sent to Celery queue `vellum-queue`.
+- Worker pulls jobs, proves, persists result (`running -> completed/failed`) in Postgres.
+- Audit events are appended into `audit_log` with `previous_entry_hash`, `entry_hash`, and Vault signature.
+- Chain integrity is verified from Postgres rows via `VellumIntegrityService`.
+- Nonce replay protection is Redis-based (`SETNX` + TTL), so it is multi-instance safe.
 
-`manifest.json` requires:
-- `circuit_id`
-- `input_schema` (JSON schema for proving input)
-- `public_signals`
-- `version`
+## Batch API Contract
 
-`circuits/library/` is reserved for reusable templates and is not compiled as a standalone circuit.
+`POST /v1/proofs/batch` accepts exactly one mode:
+
+1. Direct mode
+- `balances`: `list[int]` (1..100)
+- `limits`: `list[int]` (1..100, same length)
+- optional `request_id`
+
+2. Adapter mode
+- `source_ref`: `str`
+- optional `request_id`
+
+Rules:
+- Providing both direct arrays and `source_ref` is rejected.
+- Server enforces anti-ghost invariants:
+  - deterministic zero padding to 100
+  - explicit `active_count`
+  - strict uint bounds
 
 ## Quickstart
 
-1. Build and start services:
+1. Start full stack:
 
 ```bash
 ./up_infra.sh
 ```
 
-This regenerates dev PEM keys in `config/` and recreates containers so all services use the fresh keys.
-Because audit keys are rotated, `up_infra.sh` also resets the dev audit log (`/shared_store/proof_audit.jsonl`).
-
-Stop and remove all compose containers:
-
-```bash
-./down_infra.sh
-```
-
-2. Generate proving/verification artifacts in the prover container:
+2. Compile circuits and generate Groth16 artifacts:
 
 ```bash
 docker compose exec prover /app/setup_framework.sh
@@ -73,87 +84,51 @@ curl -fsS http://localhost:8001/healthz
 curl -fsS http://localhost:8002/healthz
 ```
 
-4. Open the GUI:
-
+4. Open UI:
 - Dashboard: `http://localhost:8000`
-- Prover Swagger: `http://localhost:8001/docs`
-- Verifier Swagger: `http://localhost:8002/docs`
+- Prover docs: `http://localhost:8001/docs`
+- Verifier docs: `http://localhost:8002/docs`
 
-The dashboard can:
-- list available circuits
-- submit proof jobs
-- poll proof status
-- verify completed proofs end-to-end
-
-## Batch API (Hard Replacement)
-
-- `POST /v1/proofs/batch`: submit `balances` + `limits` with 1..100 records.
-  - Request shape:
-    - `balances: number[]` (len 1..100)
-    - `limits: number[]` (len 1..100)
-    - `request_id?: string`
-  - Server pads to 100 rows, sets `active_count`, and proves against `batch_credit_check`.
-- Old `credit_batch_v1` item-based payload is removed from the runtime batch path (hard replacement).
-- `GET /v1/audit/verify-chain`: verify signed integrity of the complete audit chain.
-
-## Auth Config (Dev)
-
-- JWT public key: `config/jwt_public.pem`
-- Bank request verification keys: `config/bank_public_keys.json`
-- Dev private keys (for local tests only):
-  - `config/dev_jwt_private.pem`
-  - `config/dev_bank_private.pem`
-- Audit chain keys:
-  - `config/audit_private.pem`
-  - `config/audit_public.pem`
-
-Manual key regeneration (optional):
+Stop and remove containers:
 
 ```bash
-./bootstrap_dev_keys.sh
+./down_infra.sh
 ```
 
-## Benchmark Utility
+## Vault / Keys
 
-Run deterministic benchmark for 1,000 credit decisions:
+Private keys are not used from local PEM files for runtime operations.
+Runtime signing is done through Vault Transit keys:
+- `VELLUM_JWT_KEY`
+- `VELLUM_AUDIT_KEY`
+- `VELLUM_BANK_KEY`
+
+`vault-init` auto-creates these keys on startup.
+
+## Metrics and Trust-Speed
+
+- Prover/worker/verifier expose Prometheus metrics.
+- Core metrics:
+  - `vellum_proof_duration_seconds`
+  - `vellum_verify_duration_seconds`
+  - `vellum_native_verify_duration_seconds`
+- Trust-speed endpoint: `GET /v1/trust-speed`
+  - `native_verify_ms`
+  - `zk_batch_verify_ms`
+  - `trust_speedup`
+
+## Benchmarks
+
+- Legacy comparison:
 
 ```bash
 docker compose exec prover python /app/benchmark_comparison.py --sample-size 1000
 ```
 
-It compares:
-- native auditor re-calculation time
-- ZK proof verification time (proof generation excluded from timed verify section)
-
-Run the 100-decision batch showdown:
+- Batch benchmark (100 decisions in one proof):
 
 ```bash
-docker compose exec prover python /app/benchmark_batch.py
+docker compose exec prover python /app/benchmark_batch.py --seed 42
 ```
 
-Output includes:
-- native total time for 100 `balance > limit` checks
-- single batch proof verification time
-- proving overhead (separate)
-- auditor speedup ratio (`Native / single ZK verify`)
-
-Batching is the compliance bottleneck killer because the auditor verifies one proof for many decisions instead of verifying each decision independently.
-
-## Stress Tester
-
-Run stress service (profile-based):
-
-```bash
-docker compose --profile stress up --build stress_tester
-```
-
-Output report:
-- `stress_results/stress_report.json`
-- includes latency percentiles, throughput, Prover CPU/RSS peaks, and thermal-throttling indicator by degradation trend.
-
-## Multi-Arch Build (optional)
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.prover -t sentinel-zk/prover:dev --load .
-docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.verifier -t sentinel-zk/verifier:dev --load .
-```
+This reports native check time, single ZK verify time, proving overhead, and auditor speedup.

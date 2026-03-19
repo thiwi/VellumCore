@@ -3,54 +3,89 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 
-from sentinel_zk.auth import AuthManager, BEARER_SCHEME
-from sentinel_zk.config import Settings
-from sentinel_zk.errors import APIError, register_exception_handlers
-from sentinel_zk.proof_store import ProofStore
-from sentinel_zk.providers import SnarkJSProvider
-from sentinel_zk.registry import CircuitNotFoundError, CircuitRegistry
-from sentinel_zk.schemas import (
+from vellum_core.auth import AuthManager, BEARER_SCHEME
+from vellum_core.config import Settings
+from vellum_core.database import Database
+from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.metrics import (
+    observe_verify_duration,
+    prometheus_payload,
+    set_native_baseline,
+    trust_speed_snapshot,
+)
+from vellum_core.proof_store import VellumAuditStore, VellumIntegrityService
+from vellum_core.providers import SnarkJSProvider
+from vellum_core.registry import CircuitNotFoundError, CircuitRegistry
+from vellum_core.schemas import (
     AuditChainVerifyResponse,
     HealthResponse,
+    TrustSpeedResponse,
     VerifyRequest,
     VerifyResponse,
 )
+from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 
 
 settings = Settings.from_env()
+db = Database(settings.database_url)
 registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
-proof_store = ProofStore(
-    settings.shared_store_file,
-    audit_private_key_path=settings.audit_private_key_path,
-    audit_public_key_path=settings.audit_public_key_path,
-)
 provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
+vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
+key_cache = VaultPublicKeyCache(
+    client=vault_client,
+    ttl_seconds=settings.vault_public_key_cache_ttl_seconds,
+)
 auth_manager = AuthManager(
-    jwt_public_key_path=settings.jwt_public_key_path,
+    vault_client=vault_client,
+    key_cache=key_cache,
+    jwt_key_name=settings.vault_jwt_key,
     jwt_issuer=settings.jwt_issuer,
     jwt_audience=settings.jwt_audience,
-    bank_public_keys_path=settings.bank_public_keys_path,
+    bank_key_mapping=settings.bank_key_mapping,
+    redis_url=settings.redis_url,
     nonce_window_seconds=settings.nonce_window_seconds,
 )
+audit_store = VellumAuditStore(
+    db=db,
+    vault=vault_client,
+    audit_key_name=settings.vault_audit_key,
+)
+integrity_service = VellumIntegrityService(
+    db=db,
+    key_cache=key_cache,
+    audit_key_name=settings.vault_audit_key,
+)
 
-app = FastAPI(title="Sentinel-ZK Verifier Service", version="2.0.0")
+app = FastAPI(title="Vellum Verifier Service", version="3.0.0")
 register_exception_handlers(app)
 
 
-def require_jwt(
+@app.on_event("startup")
+async def startup_event() -> None:
+    await db.init_models()
+    set_native_baseline(settings.native_verify_baseline_seconds)
+
+
+async def require_jwt(
     credentials: HTTPAuthorizationCredentials | None = Depends(BEARER_SCHEME),
 ) -> dict[str, Any]:
-    return auth_manager.verify_jwt_credentials(credentials)
+    return await auth_manager.verify_jwt_credentials(credentials)
 
 
 @app.get("/healthz", response_model=HealthResponse)
 async def healthcheck() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    payload, content_type = prometheus_payload()
+    return Response(content=payload, media_type=content_type)
 
 
 @app.post("/v1/verify", response_model=VerifyResponse)
@@ -75,10 +110,12 @@ async def verify(
         proof=payload.proof,
         public_signals=payload.public_signals,
     )
-    verification_ms = (time.perf_counter() - started) * 1000.0
+    verify_seconds = time.perf_counter() - started
+    verification_ms = verify_seconds * 1000.0
+    observe_verify_duration(verify_seconds)
 
-    proof_store.append_event(
-        proof_id=f"verify-{uuid4()}",
+    await audit_store.append_event(
+        proof_id=None,
         circuit_id=payload.circuit_id,
         public_signals=payload.public_signals,
         status="completed" if valid else "failed",
@@ -97,8 +134,15 @@ async def verify(
 async def verify_audit_chain(
     _: dict[str, Any] = Depends(require_jwt),
 ) -> AuditChainVerifyResponse:
-    report = proof_store.verify_chain()
+    report = await integrity_service.verify_chain()
     return AuditChainVerifyResponse.model_validate(report)
+
+
+@app.get("/v1/trust-speed", response_model=TrustSpeedResponse)
+async def trust_speed(
+    _: dict[str, Any] = Depends(require_jwt),
+) -> TrustSpeedResponse:
+    return TrustSpeedResponse.model_validate(trust_speed_snapshot())
 
 
 if __name__ == "__main__":

@@ -1,2 +1,0 @@
-"""Sentinel-ZK core package."""
-

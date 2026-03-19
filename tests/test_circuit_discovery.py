@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sentinel_zk.circuit_discovery import discover_runnable_circuits
+from vellum_core.circuit_discovery import discover_runnable_circuits
 
 
 def test_discovery_ignores_library_and_finds_manifest_circuits() -> None:

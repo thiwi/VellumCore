@@ -7,9 +7,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from sentinel_zk.config import Settings
-from sentinel_zk.providers import SnarkJSProvider
-from sentinel_zk.registry import CircuitRegistry
+from vellum_core.config import Settings
+from vellum_core.providers import SnarkJSProvider
+from vellum_core.registry import CircuitRegistry
 
 
 @dataclass(frozen=True)

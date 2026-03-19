@@ -7,3 +7,9 @@ jsonschema==4.25.1
 pytest==8.4.2
 httpx==0.28.1
 docker==7.1.0
+celery==5.4.0
+redis==5.2.1
+SQLAlchemy==2.0.37
+asyncpg==0.30.0
+alembic==1.14.0
+prometheus-client==0.21.1

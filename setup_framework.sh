@@ -6,7 +6,7 @@ CIRCUITS_DIR="${CIRCUITS_DIR:-$ROOT_DIR/circuits}"
 SHARED_ASSETS_DIR="${SHARED_ASSETS_DIR:-$ROOT_DIR/shared_assets}"
 BUILD_ROOT="${BUILD_ROOT:-$ROOT_DIR/.build}"
 PTAU_POWER="${PTAU_POWER:-14}"
-CONTRIBUTION_ENTROPY="${CONTRIBUTION_ENTROPY:-sentinel-zk-local-dev}"
+CONTRIBUTION_ENTROPY="${CONTRIBUTION_ENTROPY:-vellum-local-dev}"
 SNARKJS_BIN="${SNARKJS_BIN:-snarkjs}"
 CIRCOM_LIB_PATH="${CIRCOM_LIB_PATH:-/usr/local/lib/node_modules}"
 
@@ -79,7 +79,7 @@ compile_circuit() {
   "$SNARKJS_BIN" powersoftau new bn128 "$ptau_power" "$ptau_0"
   "$SNARKJS_BIN" powersoftau contribute \
     "$ptau_0" "$ptau_1" \
-    --name="sentinel-initial" \
+    --name="vellum-initial" \
     -e="$CONTRIBUTION_ENTROPY"
   "$SNARKJS_BIN" powersoftau prepare phase2 "$ptau_1" "$ptau_final"
 
@@ -87,7 +87,7 @@ compile_circuit() {
   "$SNARKJS_BIN" groth16 setup "$r1cs_file" "$ptau_final" "$zkey_0"
   "$SNARKJS_BIN" zkey contribute \
     "$zkey_0" "$zkey_final" \
-    --name="sentinel-zkey" \
+    --name="vellum-zkey" \
     -e="$CONTRIBUTION_ENTROPY"
   "$SNARKJS_BIN" zkey export verificationkey "$zkey_final" "$assets_dir/verification_key.json"
 
@@ -126,7 +126,7 @@ discover_runnable_circuits() {
 import pathlib
 import sys
 
-from sentinel_zk.circuit_discovery import discover_runnable_circuits
+from vellum_core.circuit_discovery import discover_runnable_circuits
 
 circuits = discover_runnable_circuits(pathlib.Path(sys.argv[1]))
 for path, circuit_id in circuits:
@@ -140,7 +140,7 @@ main() {
 
   local arch
   arch="$(detect_arch)"
-  echo "Sentinel-ZK setup started for architecture: $arch"
+  echo "Vellum setup started for architecture: $arch"
 
   local runnable
   runnable="$(discover_runnable_circuits)"
@@ -154,7 +154,7 @@ main() {
     compile_circuit "$dir" "$circuit_id"
   done <<< "$runnable"
 
-  echo "Sentinel-ZK setup completed"
+  echo "Vellum setup completed"
 }
 
 main "$@"

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sentinel_zk.registry import CircuitRegistry
+from vellum_core.registry import CircuitRegistry
 
 
 def test_registry_discovers_sample_circuits() -> None:

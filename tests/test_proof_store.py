@@ -1,158 +1,186 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import asyncio
+import base64
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from sentinel_zk.proof_store import ProofStore
+from vellum_core.proof_store import VellumAuditStore, VellumIntegrityService
+from vellum_core.vault import VaultSignature
 
 
-def write_test_audit_keys(tmp_path: Path) -> tuple[Path, Path]:
-    private = Ed25519PrivateKey.generate()
-    public = private.public_key()
+@dataclass
+class FakeAuditRow:
+    id: int
+    timestamp: datetime
+    proof_id: str | None
+    circuit_id: str
+    status: str
+    public_signals: list[Any]
+    proof_hash: str
+    previous_entry_hash: str
+    entry_hash: str
+    signature: str
+    key_version: str
+    meta: dict[str, Any]
+    error: str | None
 
-    priv_path = tmp_path / "audit_private.pem"
-    pub_path = tmp_path / "audit_public.pem"
 
-    priv_path.write_bytes(
-        private.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
+class FakeDatabase:
+    def __init__(self) -> None:
+        self.rows: list[FakeAuditRow] = []
+
+    async def get_latest_audit_row(self) -> FakeAuditRow | None:
+        return self.rows[-1] if self.rows else None
+
+    async def append_audit_row(self, payload: dict[str, Any]) -> FakeAuditRow:
+        row = FakeAuditRow(
+            id=len(self.rows) + 1,
+            timestamp=payload["timestamp"],
+            proof_id=payload.get("proof_id"),
+            circuit_id=payload["circuit_id"],
+            status=payload["status"],
+            public_signals=list(payload.get("public_signals", [])),
+            proof_hash=payload.get("proof_hash", ""),
+            previous_entry_hash=payload.get("previous_entry_hash", ""),
+            entry_hash=payload["entry_hash"],
+            signature=payload["signature"],
+            key_version=payload.get("key_version", "1"),
+            meta=dict(payload.get("meta", {})),
+            error=payload.get("error"),
+        )
+        self.rows.append(row)
+        return row
+
+    async def list_audit_rows(self) -> list[FakeAuditRow]:
+        return list(self.rows)
+
+
+class FakeVaultClient:
+    def __init__(self, private_key: Ed25519PrivateKey) -> None:
+        self.private_key = private_key
+
+    async def sign(self, key_name: str, payload: bytes) -> VaultSignature:
+        _ = key_name
+        sig = self.private_key.sign(payload)
+        encoded = "vault:v1:" + base64.b64encode(sig).decode("utf-8")
+        return VaultSignature(raw=sig, encoded=encoded, key_version="1")
+
+
+class FakeKeyCache:
+    def __init__(self, public_key_pem: str) -> None:
+        self.public_key_pem = public_key_pem
+
+    async def get_public_key(self, *, key_name: str, key_version: str | None = None) -> str:
+        _ = (key_name, key_version)
+        return self.public_key_pem
+
+
+def _run(coro: Any) -> Any:
+    return asyncio.run(coro)
+
+
+def _build_services() -> tuple[FakeDatabase, VellumAuditStore, VellumIntegrityService]:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+
+    db = FakeDatabase()
+    store = VellumAuditStore(
+        db=db,  # type: ignore[arg-type]
+        vault=FakeVaultClient(private_key),  # type: ignore[arg-type]
+        audit_key_name="vellum-audit",
+    )
+    integrity = VellumIntegrityService(
+        db=db,  # type: ignore[arg-type]
+        key_cache=FakeKeyCache(public_pem),  # type: ignore[arg-type]
+        audit_key_name="vellum-audit",
+    )
+    return db, store, integrity
+
+
+def test_audit_store_chain_and_signature_valid() -> None:
+    db, store, integrity = _build_services()
+
+    first = _run(
+        store.append_event(
+            proof_id="proof-1",
+            circuit_id="batch_credit_check",
+            status="queued",
+            public_signals=[],
         )
     )
-    pub_path.write_bytes(
-        public.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    second = _run(
+        store.append_event(
+            proof_id="proof-1",
+            circuit_id="batch_credit_check",
+            status="completed",
+            public_signals=["1", "3"],
+            proof_payload={"proof": "payload"},
         )
-    )
-    return priv_path, pub_path
-
-
-def build_store(tmp_path: Path) -> ProofStore:
-    store_file = tmp_path / "proof_audit.jsonl"
-    priv, pub = write_test_audit_keys(tmp_path)
-    return ProofStore(
-        store_file,
-        audit_private_key_path=priv,
-        audit_public_key_path=pub,
-    )
-
-
-def test_proof_store_builds_hash_chain_and_signature(tmp_path: Path) -> None:
-    store = build_store(tmp_path)
-
-    first = store.append_event(
-        proof_id="proof-1",
-        circuit_id="credit_check",
-        public_signals=["1"],
-        status="queued",
-    )
-    second = store.append_event(
-        proof_id="proof-1",
-        circuit_id="credit_check",
-        public_signals=["1"],
-        status="completed",
-        proof_payload={"a": 1},
     )
 
     assert first["previous_entry_hash"] == ""
     assert second["previous_entry_hash"] == first["entry_hash"]
-    assert second["signature"]
-    assert store.get_latest_event("proof-1")["status"] == "completed"
+    assert len(db.rows) == 2
 
-    report = store.verify_chain()
+    report = _run(integrity.verify_chain())
     assert report["valid"] is True
     assert report["checked_entries"] == 2
+    assert report["first_broken_index"] is None
 
 
-def test_verify_chain_detects_tampering(tmp_path: Path) -> None:
-    store = build_store(tmp_path)
-    store.append_event(
-        proof_id="proof-2",
-        circuit_id="credit_check",
-        public_signals=["1"],
-        status="queued",
+def test_integrity_detects_payload_tampering() -> None:
+    db, store, integrity = _build_services()
+
+    _run(
+        store.append_event(
+            proof_id="proof-2",
+            circuit_id="batch_credit_check",
+            status="queued",
+            public_signals=[],
+        )
     )
-    store.append_event(
-        proof_id="proof-2",
-        circuit_id="credit_check",
-        public_signals=["2"],
-        status="completed",
-        proof_payload={"a": 2},
+    _run(
+        store.append_event(
+            proof_id="proof-2",
+            circuit_id="batch_credit_check",
+            status="completed",
+            public_signals=["1", "2"],
+            proof_payload={"proof": "payload"},
+        )
     )
 
-    store_file = tmp_path / "proof_audit.jsonl"
-    lines = store_file.read_text(encoding="utf-8").splitlines()
-    payload = json.loads(lines[1])
-    payload["public_signals"] = ["999999"]  # tamper payload without re-signing
-    lines[1] = json.dumps(payload, separators=(",", ":"))
-    store_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    report = store.verify_chain()
+    db.rows[1].public_signals = ["999"]
+    report = _run(integrity.verify_chain())
     assert report["valid"] is False
     assert report["first_broken_index"] == 1
-    assert "hash" in report["reason"].lower() or "signature" in report["reason"].lower()
+    assert "hash" in str(report["reason"]).lower()
 
 
-def test_verify_chain_accepts_legacy_entries(tmp_path: Path) -> None:
-    store = build_store(tmp_path)
-    store_file = tmp_path / "proof_audit.jsonl"
+def test_integrity_detects_signature_tampering() -> None:
+    db, store, integrity = _build_services()
 
-    legacy_1_payload = {
-        "proof_id": "legacy-1",
-        "created_at": "2026-03-19T10:00:00+00:00",
-        "circuit_id": "credit_check",
-        "public_signals": [],
-        "status": "queued",
-        "proof_path": None,
-        "error": None,
-        "metadata": {"request_id": "legacy"},
-        "prev_hash": "",
-    }
-    legacy_1 = {
-        **legacy_1_payload,
-        "entry_hash": store._hash_record(legacy_1_payload),  # noqa: SLF001
-    }
-
-    legacy_2_payload = {
-        "proof_id": "legacy-1",
-        "created_at": "2026-03-19T10:00:01+00:00",
-        "circuit_id": "credit_check",
-        "public_signals": ["123"],
-        "status": "completed",
-        "proof_path": "/shared_assets/proofs/legacy-1.json",
-        "error": None,
-        "metadata": {},
-        "prev_hash": legacy_1["entry_hash"],
-    }
-    legacy_2 = {
-        **legacy_2_payload,
-        "entry_hash": store._hash_record(legacy_2_payload),  # noqa: SLF001
-    }
-
-    store_file.write_text(
-        "\n".join(
-            [
-                json.dumps(legacy_1, separators=(",", ":")),
-                json.dumps(legacy_2, separators=(",", ":")),
-            ]
+    _run(
+        store.append_event(
+            proof_id="proof-3",
+            circuit_id="batch_credit_check",
+            status="completed",
+            public_signals=["1"],
+            proof_payload={"proof": "payload"},
+            metadata={"at": datetime.now(timezone.utc).isoformat()},
         )
-        + "\n",
-        encoding="utf-8",
     )
 
-    store.append_event(
-        proof_id="new-1",
-        circuit_id="batch_credit_check",
-        public_signals=["1", "1"],
-        status="completed",
-        proof_payload={"p": "v"},
-    )
-
-    report = store.verify_chain()
-    assert report["valid"] is True
-    assert report["checked_entries"] == 3
+    db.rows[0].signature = "vault:v1:" + base64.b64encode(b"bad-signature").decode("utf-8")
+    report = _run(integrity.verify_chain())
+    assert report["valid"] is False
+    assert report["first_broken_index"] == 0
+    assert "signature" in str(report["reason"]).lower()

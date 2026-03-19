@@ -1,31 +1,111 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vellum
+      POSTGRES_USER: vellum
+      POSTGRES_PASSWORD: vellum
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vellum -d vellum"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  vault:
+    image: hashicorp/vault:1.16
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: ["vault", "server", "-dev", "-dev-root-token-id=root", "-dev-listen-address=0.0.0.0:8200"]
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  vault-init:
+    image: hashicorp/vault:1.16
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VELLUM_JWT_KEY: vellum-jwt
+      VELLUM_AUDIT_KEY: vellum-audit
+      VELLUM_BANK_KEY: vellum-bank
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        until vault status >/dev/null 2>&1; do sleep 1; done
+        vault secrets enable transit || true
+        vault write -f transit/keys/$${VELLUM_JWT_KEY} type=ed25519 || true
+        vault write -f transit/keys/$${VELLUM_AUDIT_KEY} type=ed25519 || true
+        vault write -f transit/keys/$${VELLUM_BANK_KEY} type=ed25519 || true
+        echo "vault transit bootstrap completed"
+    restart: "no"
+
   prover:
     build:
       context: .
       dockerfile: Dockerfile.prover
-    image: sentinel-zk/prover:dev
+    image: vellum/prover:dev
     environment:
-      APP_NAME: sentinel-zk-prover
+      APP_NAME: vellum-prover
       CIRCUITS_DIR: /app/circuits
       SHARED_ASSETS_DIR: /shared_assets
-      PROOF_STORE_FILE: /shared_store/proof_audit.jsonl
       PROOF_OUTPUT_DIR: /shared_assets/proofs
       SNARKJS_BIN: snarkjs
+
+      DATABASE_URL: postgresql+asyncpg://vellum:vellum@postgres:5432/vellum
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_QUEUE: vellum-queue
+      REDIS_URL: redis://redis:6379/1
+
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VELLUM_JWT_KEY: vellum-jwt
+      VELLUM_AUDIT_KEY: vellum-audit
+      VELLUM_BANK_KEY: vellum-bank
+      BANK_KEY_ID: bank-key-1
+      BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
+
       JWT_ISSUER: bank.local
       JWT_AUDIENCE: sentinel-zk
-      JWT_PUBLIC_KEY_PATH: /app/config/jwt_public.pem
-      BANK_PUBLIC_KEYS_PATH: /app/config/bank_public_keys.json
-      AUDIT_PRIVATE_KEY_PATH: /app/config/audit_private.pem
-      AUDIT_PUBLIC_KEY_PATH: /app/config/audit_public.pem
       NONCE_WINDOW_SECONDS: 300
       PROVER_MAX_PARALLEL_PROOFS: 2
+      VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
+      NATIVE_VERIFY_BASELINE_SECONDS: 0.000005
     volumes:
       - ./circuits:/app/circuits:ro
-      - ./config:/app/config:ro
       - shared_assets:/shared_assets
-      - shared_store:/shared_store
     ports:
       - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
       interval: 10s
@@ -33,31 +113,93 @@ services:
       retries: 5
     restart: unless-stopped
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prover
+    image: vellum/worker:dev
+    environment:
+      APP_NAME: vellum-worker
+      CIRCUITS_DIR: /app/circuits
+      SHARED_ASSETS_DIR: /shared_assets
+      PROOF_OUTPUT_DIR: /shared_assets/proofs
+      SNARKJS_BIN: snarkjs
+
+      DATABASE_URL: postgresql+asyncpg://vellum:vellum@postgres:5432/vellum
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_QUEUE: vellum-queue
+      REDIS_URL: redis://redis:6379/1
+
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VELLUM_JWT_KEY: vellum-jwt
+      VELLUM_AUDIT_KEY: vellum-audit
+      VELLUM_BANK_KEY: vellum-bank
+      BANK_KEY_ID: bank-key-1
+      BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
+
+      JWT_ISSUER: bank.local
+      JWT_AUDIENCE: sentinel-zk
+      NONCE_WINDOW_SECONDS: 300
+      PROVER_MAX_PARALLEL_PROOFS: 2
+      VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
+      WORKER_METRICS_PORT: 9108
+    volumes:
+      - ./circuits:/app/circuits:ro
+      - shared_assets:/shared_assets
+    command: ["sh", "-c", "celery -A worker:celery_app worker -Q \"$$CELERY_QUEUE\" --loglevel=INFO --concurrency=\"$$PROVER_MAX_PARALLEL_PROOFS\""]
+    ports:
+      - "9108:9108"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   verifier:
     build:
       context: .
       dockerfile: Dockerfile.verifier
-    image: sentinel-zk/verifier:dev
+    image: vellum/verifier:dev
     environment:
-      APP_NAME: sentinel-zk-verifier
+      APP_NAME: vellum-verifier
       CIRCUITS_DIR: /app/circuits
       SHARED_ASSETS_DIR: /shared_assets
-      PROOF_STORE_FILE: /shared_store/proof_audit.jsonl
       SNARKJS_BIN: snarkjs
+
+      DATABASE_URL: postgresql+asyncpg://vellum:vellum@postgres:5432/vellum
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_QUEUE: vellum-queue
+      REDIS_URL: redis://redis:6379/1
+
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VELLUM_JWT_KEY: vellum-jwt
+      VELLUM_AUDIT_KEY: vellum-audit
+      VELLUM_BANK_KEY: vellum-bank
+      BANK_KEY_ID: bank-key-1
+      BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
+
       JWT_ISSUER: bank.local
       JWT_AUDIENCE: sentinel-zk
-      JWT_PUBLIC_KEY_PATH: /app/config/jwt_public.pem
-      BANK_PUBLIC_KEYS_PATH: /app/config/bank_public_keys.json
-      AUDIT_PRIVATE_KEY_PATH: /app/config/audit_private.pem
-      AUDIT_PUBLIC_KEY_PATH: /app/config/audit_public.pem
       NONCE_WINDOW_SECONDS: 300
+      VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
+      NATIVE_VERIFY_BASELINE_SECONDS: 0.000005
     volumes:
       - ./circuits:/app/circuits:ro
-      - ./config:/app/config:ro
       - shared_assets:/shared_assets
-      - shared_store:/shared_store
     ports:
       - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8002/healthz"]
       interval: 10s
@@ -69,24 +211,28 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dashboard
-    image: sentinel-zk/dashboard:dev
+    image: vellum/dashboard:dev
     environment:
       PROVER_URL: http://prover:8001
       VERIFIER_URL: http://verifier:8002
       JWT_ISSUER: bank.local
       JWT_AUDIENCE: sentinel-zk
       BANK_KEY_ID: bank-key-1
-      JWT_PRIVATE_KEY_PATH: /app/config/dev_jwt_private.pem
-      BANK_PRIVATE_KEY_PATH: /app/config/dev_bank_private.pem
       CIRCUITS_DIR: /app/circuits
+
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VELLUM_JWT_KEY: vellum-jwt
+      VELLUM_BANK_KEY: vellum-bank
     depends_on:
       prover:
         condition: service_healthy
       verifier:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
     volumes:
       - ./circuits:/app/circuits:ro
-      - ./config:/app/config:ro
     ports:
       - "8000:8000"
     healthcheck:
@@ -96,29 +242,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  stress_tester:
-    build:
-      context: .
-      dockerfile: Dockerfile.stress
-    image: sentinel-zk/stress-tester:dev
-    profiles: ["stress"]
-    environment:
-      PROVER_URL: http://prover:8001
-      JWT_ISSUER: bank.local
-      JWT_AUDIENCE: sentinel-zk
-      BANK_KEY_ID: bank-key-1
-      JWT_PRIVATE_KEY_PATH: /app/config/dev_jwt_private.pem
-      BANK_PRIVATE_KEY_PATH: /app/config/dev_bank_private.pem
-    depends_on:
-      prover:
-        condition: service_healthy
-    volumes:
-      - ./config:/app/config:ro
-      - ./stress_results:/app/stress_results
-      - ${DOCKER_SOCK_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
-    command: ["python", "/app/stress_tester.py", "--output", "/app/stress_results/stress_report.json"]
-    restart: "no"
-
 volumes:
   shared_assets:
-  shared_store:
+  postgres_data:
