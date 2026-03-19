@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, String, Text, select
+from sqlalchemy import JSON, BigInteger, DateTime, String, Text, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -151,6 +151,17 @@ class Database:
     async def append_audit_row(self, payload: AuditAppendInput | dict[str, Any]) -> AuditLog:
         normalized = _normalize_audit_payload(payload)
         async with self.session_factory() as session:
+            # Serialize all audit-link writes across workers/processes.
+            await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": 2403192601})
+
+            latest_result = await session.execute(
+                select(AuditLog).order_by(AuditLog.id.desc()).limit(1)
+            )
+            latest = latest_result.scalar_one_or_none()
+            expected_previous = latest.entry_hash if latest is not None else ""
+            if normalized.previous_entry_hash != expected_previous:
+                raise RuntimeError("audit_chain_conflict")
+
             row = AuditLog(
                 timestamp=normalized.timestamp,
                 proof_id=normalized.proof_id,

@@ -31,6 +31,7 @@ COPY prover_service.py /app/prover_service.py
 COPY worker.py /app/worker.py
 COPY benchmark_comparison.py /app/benchmark_comparison.py
 COPY benchmark_batch.py /app/benchmark_batch.py
+COPY evaluate_vellum_pivot.py /app/evaluate_vellum_pivot.py
 COPY setup_framework.sh /app/setup_framework.sh
 COPY circuits /app/circuits
 COPY config /app/config

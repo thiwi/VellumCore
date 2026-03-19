@@ -59,41 +59,52 @@ class VellumAuditStore:
     ) -> dict[str, Any]:
         metadata_payload = metadata or {}
         proof_hash = _compute_proof_hash(proof_payload)
+        row = None
+        last_conflict: Exception | None = None
+        for _ in range(8):
+            latest = await self.db.get_latest_audit_row()
+            previous_entry_hash = latest.entry_hash if latest is not None else ""
 
-        latest = await self.db.get_latest_audit_row()
-        previous_entry_hash = latest.entry_hash if latest is not None else ""
-
-        timestamp = datetime.now(timezone.utc).replace(microsecond=0)
-        link_payload = {
-            "timestamp": timestamp.isoformat(),
-            "proof_id": proof_id,
-            "circuit_id": circuit_id,
-            "status": status,
-            "public_signals": public_signals,
-            "proof_hash": proof_hash,
-            "previous_entry_hash": previous_entry_hash,
-            "metadata": metadata_payload,
-            "error": error,
-        }
-        entry_hash = _hash_record(link_payload)
-        signature = await self.vault.sign(self.audit_key_name, entry_hash.encode("utf-8"))
-
-        row = await self.db.append_audit_row(
-            {
-                "timestamp": timestamp,
+            timestamp = datetime.now(timezone.utc).replace(microsecond=0)
+            link_payload = {
+                "timestamp": timestamp.isoformat(),
                 "proof_id": proof_id,
                 "circuit_id": circuit_id,
                 "status": status,
                 "public_signals": public_signals,
                 "proof_hash": proof_hash,
                 "previous_entry_hash": previous_entry_hash,
-                "entry_hash": entry_hash,
-                "signature": signature.encoded,
-                "key_version": signature.key_version,
-                "meta": metadata_payload,
+                "metadata": metadata_payload,
                 "error": error,
             }
-        )
+            entry_hash = _hash_record(link_payload)
+            signature = await self.vault.sign(self.audit_key_name, entry_hash.encode("utf-8"))
+
+            try:
+                row = await self.db.append_audit_row(
+                    {
+                        "timestamp": timestamp,
+                        "proof_id": proof_id,
+                        "circuit_id": circuit_id,
+                        "status": status,
+                        "public_signals": public_signals,
+                        "proof_hash": proof_hash,
+                        "previous_entry_hash": previous_entry_hash,
+                        "entry_hash": entry_hash,
+                        "signature": signature.encoded,
+                        "key_version": signature.key_version,
+                        "meta": metadata_payload,
+                        "error": error,
+                    }
+                )
+                break
+            except RuntimeError as exc:
+                if "audit_chain_conflict" not in str(exc):
+                    raise
+                last_conflict = exc
+
+        if row is None:
+            raise RuntimeError("Failed to append audit event due to persistent chain conflicts") from last_conflict
 
         return {
             "id": row.id,

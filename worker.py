@@ -24,15 +24,8 @@ from vellum_core.vault import VaultTransitClient
 BATCH_CIRCUIT_ID = "batch_credit_check"
 
 settings = Settings.from_env()
-db = Database(settings.database_url)
 registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
 provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
-vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
-audit_store = VellumAuditStore(
-    db=db,
-    vault=vault_client,
-    audit_key_name=settings.vault_audit_key,
-)
 adapter = MainframeAdapter()
 
 _METRICS_STARTED = False
@@ -53,6 +46,14 @@ def process_proof_job(proof_id: str) -> str:
 
 
 async def _process_proof_job_async(proof_id: str) -> None:
+    db = Database(settings.database_url)
+    vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
+    audit_store = VellumAuditStore(
+        db=db,
+        vault=vault_client,
+        audit_key_name=settings.vault_audit_key,
+    )
+
     await db.init_models()
     job = await db.get_proof_job(proof_id)
     if job is None:
