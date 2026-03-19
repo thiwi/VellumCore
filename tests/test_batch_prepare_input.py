@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from sentinel_zk.batching import MAX_BATCH_SIZE, batch_prepare_input
+from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
 
 
 def test_batch_prepare_input_pads_to_hundred() -> None:

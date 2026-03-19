@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from sentinel_zk.schemas import CircuitManifest
+from vellum_core.schemas import CircuitManifest
 
 
 class CircuitNotFoundError(Exception):

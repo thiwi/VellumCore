@@ -6,9 +6,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from sentinel_zk.errors import APIError
-from sentinel_zk.providers.base import ProofResult, ZKProvider
-from sentinel_zk.registry import CircuitRegistry
+from vellum_core.errors import APIError
+from vellum_core.providers.base import ProofResult, ZKProvider
+from vellum_core.registry import CircuitRegistry
 
 
 class SnarkJSProvider(ZKProvider):

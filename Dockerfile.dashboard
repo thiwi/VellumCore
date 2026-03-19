@@ -12,7 +12,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY sentinel_zk /app/sentinel_zk
+COPY vellum_core /app/vellum_core
 COPY dashboard_service.py /app/dashboard_service.py
 COPY circuits /app/circuits
 COPY config /app/config

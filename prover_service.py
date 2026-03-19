@@ -1,253 +1,75 @@
 from __future__ import annotations
 
-import asyncio
-import json
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
-from jsonschema import ValidationError as JSONSchemaValidationError
-from jsonschema import validate as validate_jsonschema
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from sentinel_zk.auth import AuthManager, BEARER_SCHEME
-from sentinel_zk.batching import batch_prepare_input
-from sentinel_zk.config import Settings
-from sentinel_zk.errors import APIError, register_exception_handlers
-from sentinel_zk.proof_store import ProofStore
-from sentinel_zk.providers import SnarkJSProvider
-from sentinel_zk.registry import CircuitNotFoundError, CircuitRegistry
-from sentinel_zk.schemas import (
+from vellum_core.auth import AuthManager, BEARER_SCHEME
+from vellum_core.celery_app import celery_app
+from vellum_core.config import Settings
+from vellum_core.database import Database
+from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.logic.batcher import batch_prepare_input
+from vellum_core.metrics import prometheus_payload
+from vellum_core.proof_store import VellumAuditStore
+from vellum_core.schemas import (
     BatchProveRequest,
     HealthResponse,
     ProofStatusResponse,
     ProveAcceptedResponse,
-    ProveRequest,
 )
+from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 
 
 BATCH_CIRCUIT_ID = "batch_credit_check"
-TModel = TypeVar("TModel", bound=BaseModel)
-
-
-@dataclass(frozen=True)
-class ProofJobPayload:
-    circuit_id: str
-    private_input: dict[str, Any]
-    request_id: str | None
-    metadata: dict[str, Any]
-
-
-class ProofOrchestrator:
-    def __init__(
-        self,
-        *,
-        registry: CircuitRegistry,
-        provider: SnarkJSProvider,
-        store: ProofStore,
-        proof_output_dir: Path,
-        max_parallel_proofs: int,
-    ) -> None:
-        self.registry = registry
-        self.provider = provider
-        self.store = store
-        self.proof_output_dir = proof_output_dir
-        self.proof_output_dir.mkdir(parents=True, exist_ok=True)
-        self._jobs: set[asyncio.Task[Any]] = set()
-        self._prove_semaphore = asyncio.Semaphore(max_parallel_proofs)
-
-    async def submit(self, payload: ProofJobPayload) -> str:
-        try:
-            manifest = self.registry.get_manifest(payload.circuit_id)
-        except CircuitNotFoundError as exc:
-            raise APIError(
-                status_code=404,
-                code="unknown_circuit",
-                message="Circuit id not found",
-                details={"circuit_id": payload.circuit_id},
-            ) from exc
-
-        try:
-            validate_jsonschema(payload.private_input, manifest.input_schema)
-        except JSONSchemaValidationError as exc:
-            raise APIError(
-                status_code=422,
-                code="invalid_private_input",
-                message="Private input does not satisfy manifest schema",
-                details={"reason": exc.message},
-            ) from exc
-
-        await self.provider.ensure_artifacts(payload.circuit_id)
-
-        proof_id = str(uuid4())
-        queued_meta = {
-            **payload.metadata,
-            "request_id": payload.request_id,
-            "mode": payload.metadata.get("mode", "single"),
-        }
-        self.store.append_event(
-            proof_id=proof_id,
-            circuit_id=payload.circuit_id,
-            public_signals=[],
-            status="queued",
-            metadata=queued_meta,
-        )
-
-        task = asyncio.create_task(self._run_proof_job(proof_id, payload))
-        self._jobs.add(task)
-        task.add_done_callback(self._jobs.discard)
-        return proof_id
-
-    async def get_status(self, proof_id: str) -> ProofStatusResponse:
-        record = self.store.get_latest_event(proof_id)
-        if record is None:
-            raise APIError(
-                status_code=404,
-                code="unknown_proof_id",
-                message="No proof found for id",
-                details={"proof_id": proof_id},
-            )
-
-        proof_payload: dict[str, Any] | None = None
-        proof_path = record.get("proof_path")
-        if record.get("status") == "completed" and isinstance(proof_path, str):
-            path = Path(proof_path)
-            if path.exists():
-                proof_blob = json.loads(path.read_text(encoding="utf-8"))
-                proof_payload = proof_blob.get("proof")
-
-        created_at_raw = record.get("created_at") or record.get("timestamp")
-        created_at = datetime.fromisoformat(created_at_raw)
-        return ProofStatusResponse(
-            proof_id=record["proof_id"],
-            status=record["status"],
-            circuit_id=record["circuit_id"],
-            public_signals=record.get("public_signals", []),
-            proof=proof_payload,
-            error=record.get("error"),
-            metadata=record.get("metadata"),
-            created_at=created_at,
-        )
-
-    async def _run_proof_job(self, proof_id: str, payload: ProofJobPayload) -> None:
-        running_meta = {**payload.metadata, "request_id": payload.request_id}
-        self.store.append_event(
-            proof_id=proof_id,
-            circuit_id=payload.circuit_id,
-            public_signals=[],
-            status="running",
-            metadata=running_meta,
-        )
-        try:
-            async with self._prove_semaphore:
-                result = await self.provider.generate_proof(
-                    payload.circuit_id, payload.private_input
-                )
-            proof_path = self.proof_output_dir / f"{proof_id}.json"
-            proof_file_payload = {
-                "proof": result.proof,
-                "public_signals": result.public_signals,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            proof_path.write_text(
-                json.dumps(proof_file_payload, separators=(",", ":")),
-                encoding="utf-8",
-            )
-            self.store.append_event(
-                proof_id=proof_id,
-                circuit_id=payload.circuit_id,
-                public_signals=result.public_signals,
-                status="completed",
-                proof_path=str(proof_path),
-                proof_payload=result.proof,
-                metadata=running_meta,
-            )
-        except APIError as exc:
-            self.store.append_event(
-                proof_id=proof_id,
-                circuit_id=payload.circuit_id,
-                public_signals=[],
-                status="failed",
-                error=exc.message,
-                metadata={
-                    **running_meta,
-                    "error_code": exc.code,
-                    "error_details": exc.details,
-                },
-            )
-        except Exception as exc:  # pragma: no cover
-            self.store.append_event(
-                proof_id=proof_id,
-                circuit_id=payload.circuit_id,
-                public_signals=[],
-                status="failed",
-                error=str(exc),
-                metadata={
-                    **running_meta,
-                    "error_type": exc.__class__.__name__,
-                },
-            )
-
 
 settings = Settings.from_env()
-registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
-proof_store = ProofStore(
-    settings.shared_store_file,
-    audit_private_key_path=settings.audit_private_key_path,
-    audit_public_key_path=settings.audit_public_key_path,
+db = Database(settings.database_url)
+vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
+key_cache = VaultPublicKeyCache(
+    client=vault_client,
+    ttl_seconds=settings.vault_public_key_cache_ttl_seconds,
 )
-provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
 auth_manager = AuthManager(
-    jwt_public_key_path=settings.jwt_public_key_path,
+    vault_client=vault_client,
+    key_cache=key_cache,
+    jwt_key_name=settings.vault_jwt_key,
     jwt_issuer=settings.jwt_issuer,
     jwt_audience=settings.jwt_audience,
-    bank_public_keys_path=settings.bank_public_keys_path,
+    bank_key_mapping=settings.bank_key_mapping,
+    redis_url=settings.redis_url,
     nonce_window_seconds=settings.nonce_window_seconds,
 )
-orchestrator = ProofOrchestrator(
-    registry=registry,
-    provider=provider,
-    store=proof_store,
-    proof_output_dir=settings.proof_output_dir,
-    max_parallel_proofs=settings.max_parallel_proofs,
+audit_store = VellumAuditStore(
+    db=db,
+    vault=vault_client,
+    audit_key_name=settings.vault_audit_key,
 )
 
-app = FastAPI(title="Sentinel-ZK Prover Service", version="2.0.0")
+app = FastAPI(title="Vellum Prover Service", version="3.0.0")
 register_exception_handlers(app)
 
 
-def require_jwt(
+@app.on_event("startup")
+async def startup_event() -> None:
+    await db.init_models()
+
+
+async def require_jwt(
     credentials: HTTPAuthorizationCredentials | None = Depends(BEARER_SCHEME),
 ) -> dict[str, Any]:
-    return auth_manager.verify_jwt_credentials(credentials)
+    return await auth_manager.verify_jwt_credentials(credentials)
 
 
-def _build_batch_private_input(payload: BatchProveRequest) -> dict[str, Any]:
-    try:
-        prepared = batch_prepare_input(
-            balances=payload.balances,
-            limits=payload.limits,
-            batch_size=100,
-        )
-    except ValueError as exc:
-        raise APIError(
-            status_code=422,
-            code="invalid_batch_input",
-            message="Batch payload invalid",
-            details={"reason": str(exc)},
-        ) from exc
-    return prepared.to_circuit_input()
-
-
-async def _decode_and_authenticate(request: Request, model_type: type[TModel]) -> TModel:
+async def _decode_and_authenticate(request: Request) -> BatchProveRequest:
     raw_body = await request.body()
     await auth_manager.verify_handshake(request, raw_body)
     try:
-        return model_type.model_validate_json(raw_body)
+        return BatchProveRequest.model_validate_json(raw_body)
     except ValidationError as exc:
         raise APIError(
             status_code=422,
@@ -262,21 +84,10 @@ async def healthcheck() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-@app.post("/v1/proofs", status_code=202, response_model=ProveAcceptedResponse)
-async def create_proof(
-    request: Request,
-    _: dict[str, Any] = Depends(require_jwt),
-) -> ProveAcceptedResponse:
-    payload = await _decode_and_authenticate(request, ProveRequest)
-    proof_id = await orchestrator.submit(
-        ProofJobPayload(
-            circuit_id=payload.circuit_id,
-            private_input=payload.private_input,
-            request_id=payload.request_id,
-            metadata={"mode": "single"},
-        )
-    )
-    return ProveAcceptedResponse(proof_id=proof_id, status="queued")
+@app.get("/metrics")
+async def metrics() -> Response:
+    payload, content_type = prometheus_payload()
+    return Response(content=payload, media_type=content_type)
 
 
 @app.post("/v1/proofs/batch", status_code=202, response_model=ProveAcceptedResponse)
@@ -284,16 +95,60 @@ async def create_batch_proof(
     request: Request,
     _: dict[str, Any] = Depends(require_jwt),
 ) -> ProveAcceptedResponse:
-    payload = await _decode_and_authenticate(request, BatchProveRequest)
-    private_input = _build_batch_private_input(payload)
-    proof_id = await orchestrator.submit(
-        ProofJobPayload(
-            circuit_id=BATCH_CIRCUIT_ID,
-            private_input=private_input,
-            request_id=payload.request_id,
-            metadata={"mode": "batch", "batch_size": len(payload.balances)},
-        )
+    payload = await _decode_and_authenticate(request)
+
+    private_input: dict[str, Any] | None = None
+    source_ref: str | None = payload.source_ref
+
+    if payload.source_ref is None:
+        assert payload.balances is not None
+        assert payload.limits is not None
+        try:
+            prepared = batch_prepare_input(
+                balances=payload.balances,
+                limits=payload.limits,
+            )
+        except ValueError as exc:
+            raise APIError(
+                status_code=422,
+                code="invalid_batch_input",
+                message="Batch payload invalid",
+                details={"reason": str(exc)},
+            ) from exc
+        private_input = prepared.to_circuit_input()
+
+    proof_id = str(uuid4())
+    metadata = {
+        "mode": "batch",
+        "request_id": payload.request_id,
+        "source_mode": "source_ref" if source_ref is not None else "direct",
+        "batch_size": len(payload.balances) if payload.balances is not None else 100,
+    }
+
+    await db.create_proof_job(
+        proof_id=proof_id,
+        circuit_id=BATCH_CIRCUIT_ID,
+        status="queued",
+        request_payload=payload.model_dump(),
+        private_input=private_input,
+        source_ref=source_ref,
+        metadata=metadata,
     )
+
+    await audit_store.append_event(
+        proof_id=proof_id,
+        circuit_id=BATCH_CIRCUIT_ID,
+        status="queued",
+        public_signals=[],
+        metadata=metadata,
+    )
+
+    celery_app.send_task(
+        "worker.process_proof_job",
+        args=[proof_id],
+        queue=settings.celery_queue,
+    )
+
     return ProveAcceptedResponse(proof_id=proof_id, status="queued")
 
 
@@ -302,7 +157,26 @@ async def get_proof_status(
     proof_id: str,
     _: dict[str, Any] = Depends(require_jwt),
 ) -> ProofStatusResponse:
-    return await orchestrator.get_status(proof_id)
+    job = await db.get_proof_job(proof_id)
+    if job is None:
+        raise APIError(
+            status_code=404,
+            code="unknown_proof_id",
+            message="No proof found for id",
+            details={"proof_id": proof_id},
+        )
+
+    return ProofStatusResponse(
+        proof_id=job.proof_id,
+        status=job.status,
+        circuit_id=job.circuit_id,
+        public_signals=job.public_signals or [],
+        proof=job.proof,
+        error=job.error,
+        metadata=job.meta,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 if __name__ == "__main__":

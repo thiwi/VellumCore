@@ -1,33 +1,31 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import json
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import jwt
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from fastapi import Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
+from redis.asyncio import Redis
 
-from sentinel_zk.errors import APIError
+from vellum_core.errors import APIError
+from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 
 
 BEARER_SCHEME = HTTPBearer(auto_error=False)
 
 
-class NonceReplayGuard:
-    def __init__(self, window_seconds: int) -> None:
+class RedisNonceReplayGuard:
+    def __init__(self, *, redis_url: str, window_seconds: int) -> None:
         self.window_seconds = window_seconds
-        self._seen: dict[str, float] = {}
-        self._lock = asyncio.Lock()
+        self.redis = Redis.from_url(redis_url, decode_responses=True)
 
     async def check_and_store(self, *, key_id: str, nonce: str, timestamp: float) -> None:
         now = time.time()
@@ -39,42 +37,76 @@ class NonceReplayGuard:
                 details={"window_seconds": self.window_seconds},
             )
 
-        token = f"{key_id}:{nonce}"
-        async with self._lock:
-            self._cleanup(now)
-            if token in self._seen:
-                raise APIError(
-                    status_code=409,
-                    code="nonce_replay",
-                    message="Replay detected for nonce",
-                    details={"nonce": nonce},
-                )
-            self._seen[token] = timestamp
+        redis_key = f"vellum:nonce:{key_id}:{nonce}"
+        stored = await self.redis.set(redis_key, str(timestamp), ex=self.window_seconds, nx=True)
+        if not stored:
+            raise APIError(
+                status_code=409,
+                code="nonce_replay",
+                message="Replay detected for nonce",
+                details={"nonce": nonce},
+            )
 
-    def _cleanup(self, now: float) -> None:
-        threshold = now - self.window_seconds
-        stale_keys = [key for key, ts in self._seen.items() if ts < threshold]
-        for key in stale_keys:
-            self._seen.pop(key, None)
+
+class VaultJWTSigner:
+    def __init__(
+        self,
+        *,
+        vault_client: VaultTransitClient,
+        key_name: str,
+        issuer: str,
+        audience: str,
+    ) -> None:
+        self.vault_client = vault_client
+        self.key_name = key_name
+        self.issuer = issuer
+        self.audience = audience
+
+    async def sign(self, *, subject: str, ttl_seconds: int = 3600) -> str:
+        now = int(time.time())
+        payload = {
+            "iss": self.issuer,
+            "aud": self.audience,
+            "sub": subject,
+            "iat": now,
+            "exp": now + ttl_seconds,
+        }
+        header = {"alg": "EdDSA", "typ": "JWT"}
+
+        header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+        payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+
+        signature = await self.vault_client.sign(self.key_name, signing_input)
+        sig_b64 = _b64url_encode(signature.raw)
+        return f"{header_b64}.{payload_b64}.{sig_b64}"
 
 
 class AuthManager:
     def __init__(
         self,
         *,
-        jwt_public_key_path: Path,
+        vault_client: VaultTransitClient,
+        key_cache: VaultPublicKeyCache,
+        jwt_key_name: str,
         jwt_issuer: str,
         jwt_audience: str,
-        bank_public_keys_path: Path,
+        bank_key_mapping: dict[str, str],
+        redis_url: str,
         nonce_window_seconds: int,
     ) -> None:
+        self.vault_client = vault_client
+        self.key_cache = key_cache
+        self.jwt_key_name = jwt_key_name
         self.jwt_issuer = jwt_issuer
         self.jwt_audience = jwt_audience
-        self.jwt_public_key = jwt_public_key_path.read_text(encoding="utf-8")
-        self.bank_public_keys = self._load_bank_keys(bank_public_keys_path)
-        self.replay_guard = NonceReplayGuard(window_seconds=nonce_window_seconds)
+        self.bank_key_mapping = bank_key_mapping
+        self.replay_guard = RedisNonceReplayGuard(
+            redis_url=redis_url,
+            window_seconds=nonce_window_seconds,
+        )
 
-    def verify_jwt_credentials(
+    async def verify_jwt_credentials(
         self, credentials: HTTPAuthorizationCredentials | None
     ) -> dict[str, Any]:
         if credentials is None:
@@ -84,12 +116,13 @@ class AuthManager:
                 message="Missing bearer token",
             )
 
+        public_key_value = await self.key_cache.get_public_key(key_name=self.jwt_key_name)
         token = credentials.credentials
         try:
             claims = jwt.decode(
                 token,
-                self.jwt_public_key,
-                algorithms=["RS256"],
+                _load_ed25519_public_key(public_key_value),
+                algorithms=["EdDSA"],
                 issuer=self.jwt_issuer,
                 audience=self.jwt_audience,
                 options={"require": ["iss", "aud", "sub", "iat", "exp"]},
@@ -107,7 +140,7 @@ class AuthManager:
         key_id = request.headers.get("X-Bank-Key-Id")
         timestamp_raw = request.headers.get("X-Bank-Timestamp")
         nonce = request.headers.get("X-Bank-Nonce")
-        signature_b64 = request.headers.get("X-Bank-Signature")
+        signature_value = request.headers.get("X-Bank-Signature")
 
         missing = [
             name
@@ -115,7 +148,7 @@ class AuthManager:
                 "X-Bank-Key-Id": key_id,
                 "X-Bank-Timestamp": timestamp_raw,
                 "X-Bank-Nonce": nonce,
-                "X-Bank-Signature": signature_b64,
+                "X-Bank-Signature": signature_value,
             }.items()
             if not value
         ]
@@ -127,17 +160,22 @@ class AuthManager:
                 details={"missing_headers": missing},
             )
 
+        assert key_id is not None
+        assert timestamp_raw is not None
+        assert nonce is not None
+        assert signature_value is not None
+
         timestamp_epoch = self._parse_timestamp(timestamp_raw)
         canonical = self._canonical_request_string(
             method=request.method,
             path=request.url.path,
             timestamp=timestamp_raw,
-            nonce=nonce or "",
+            nonce=nonce,
             raw_body=raw_body,
         )
 
-        pubkey = self.bank_public_keys.get(key_id or "")
-        if pubkey is None:
+        bank_vault_key = self.bank_key_mapping.get(key_id)
+        if bank_vault_key is None:
             raise APIError(
                 status_code=401,
                 code="unknown_bank_key",
@@ -145,25 +183,21 @@ class AuthManager:
                 details={"key_id": key_id},
             )
 
-        try:
-            signature = base64.b64decode(signature_b64 or "", validate=True)
-            pubkey.verify(
-                signature,
-                canonical.encode("utf-8"),
-                padding.PKCS1v15(),
-                hashes.SHA256(),
-            )
-        except Exception as exc:
+        signature_raw, signature_key_version = VaultTransitClient.decode_signature(signature_value)
+        public_key_pem = await self.key_cache.get_public_key(
+            key_name=bank_vault_key,
+            key_version=signature_key_version,
+        )
+        if not _verify_ed25519_signature(public_key_pem, canonical.encode("utf-8"), signature_raw):
             raise APIError(
                 status_code=401,
                 code="invalid_handshake_signature",
                 message="Bank request signature invalid",
-                details={"reason": str(exc)},
-            ) from exc
+            )
 
         await self.replay_guard.check_and_store(
-            key_id=key_id or "",
-            nonce=nonce or "",
+            key_id=key_id,
+            nonce=nonce,
             timestamp=timestamp_epoch,
         )
 
@@ -180,13 +214,7 @@ class AuthManager:
         return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
 
     @staticmethod
-    def _parse_timestamp(timestamp_raw: str | None) -> float:
-        if timestamp_raw is None:
-            raise APIError(
-                status_code=401,
-                code="invalid_timestamp",
-                message="Missing request timestamp",
-            )
+    def _parse_timestamp(timestamp_raw: str) -> float:
         if timestamp_raw.isdigit():
             return float(timestamp_raw)
         try:
@@ -202,17 +230,28 @@ class AuthManager:
                 details={"value": timestamp_raw},
             ) from exc
 
-    @staticmethod
-    def _load_bank_keys(path: Path) -> dict[str, Any]:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        keys_blob = raw.get("keys") if isinstance(raw, dict) else None
-        keys_map = keys_blob if isinstance(keys_blob, dict) else raw
-        if not isinstance(keys_map, dict):
-            raise ValueError("bank public key file must contain a JSON object")
 
-        parsed: dict[str, Any] = {}
-        for key_id, pem in keys_map.items():
-            if not isinstance(key_id, str) or not isinstance(pem, str):
-                raise ValueError("invalid bank public key map")
-            parsed[key_id] = load_pem_public_key(pem.encode("utf-8"))
-        return parsed
+def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: bytes) -> bool:
+    try:
+        key = _load_ed25519_public_key(public_key_pem)
+        key.verify(signature, payload)
+        return True
+    except Exception:
+        return False
+
+
+def _load_ed25519_public_key(public_key_value: str) -> Ed25519PublicKey:
+    try:
+        key = load_pem_public_key(public_key_value.encode("utf-8"))
+        if isinstance(key, Ed25519PublicKey):
+            return key
+    except Exception:
+        pass
+
+    # Vault transit ed25519 exposes raw 32-byte public key as base64.
+    raw = base64.b64decode(public_key_value)
+    return Ed25519PublicKey.from_public_bytes(raw)
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
