@@ -1,10 +1,12 @@
+"""Async SQLAlchemy persistence layer for proof jobs and audit chain rows."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, String, Text, select, text
+from sqlalchemy import JSON, BigInteger, DateTime, String, Text, desc, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -15,10 +17,14 @@ except ImportError:  # pragma: no cover - compatibility for older SQLAlchemy
 
 
 class Base(DeclarativeBase):
+    """SQLAlchemy declarative base for reference deployment tables."""
+
     pass
 
 
 class ProofJob(Base):
+    """Persistent job record for asynchronous proof generation."""
+
     __tablename__ = "proof_jobs"
 
     proof_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -37,6 +43,8 @@ class ProofJob(Base):
 
 
 class AuditLog(Base):
+    """Append-only audit chain table with signed hash links."""
+
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -56,6 +64,8 @@ class AuditLog(Base):
 
 @dataclass(frozen=True)
 class AuditAppendInput:
+    """Normalized shape for writing audit rows."""
+
     timestamp: datetime
     proof_id: str | None
     circuit_id: str
@@ -71,6 +81,8 @@ class AuditAppendInput:
 
 
 class Database:
+    """Async persistence gateway for proof jobs and audit log operations."""
+
     def __init__(self, database_url: str) -> None:
         self.database_url = database_url
         self.engine: AsyncEngine = create_async_engine(database_url, future=True)
@@ -84,6 +96,7 @@ class Database:
             )
 
     async def init_models(self) -> None:
+        """Create tables if they do not already exist."""
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
@@ -98,6 +111,7 @@ class Database:
         source_ref: str | None,
         metadata: dict[str, Any],
     ) -> ProofJob:
+        """Insert and return a new proof job."""
         now = _utc_now()
         async with self.session_factory() as session:
             job = ProofJob(
@@ -117,8 +131,28 @@ class Database:
             return job
 
     async def get_proof_job(self, proof_id: str) -> ProofJob | None:
+        """Return a job by id or None if absent."""
         async with self.session_factory() as session:
             return await session.get(ProofJob, proof_id)
+
+    async def list_proof_jobs(
+        self,
+        *,
+        status: str | None = None,
+        circuit_id: str | None = None,
+        limit: int = 50,
+    ) -> list[ProofJob]:
+        """List recent jobs with optional status/circuit filters."""
+        bounded_limit = min(max(limit, 1), 200)
+        async with self.session_factory() as session:
+            query = select(ProofJob)
+            if status is not None:
+                query = query.where(ProofJob.status == status)
+            if circuit_id is not None:
+                query = query.where(ProofJob.circuit_id == circuit_id)
+            query = query.order_by(desc(ProofJob.created_at)).limit(bounded_limit)
+            result = await session.execute(query)
+            return list(result.scalars().all())
 
     async def update_proof_job(
         self,
@@ -130,6 +164,7 @@ class Database:
         proof_path: str | None = None,
         error: str | None = None,
     ) -> ProofJob | None:
+        """Apply status/result updates to an existing job."""
         async with self.session_factory() as session:
             job = await session.get(ProofJob, proof_id)
             if job is None:
@@ -149,6 +184,7 @@ class Database:
             return job
 
     async def append_audit_row(self, payload: AuditAppendInput | dict[str, Any]) -> AuditLog:
+        """Append one audit row, enforcing chain continuity under DB lock."""
         normalized = _normalize_audit_payload(payload)
         async with self.session_factory() as session:
             # Serialize all audit-link writes across workers/processes.
@@ -182,18 +218,21 @@ class Database:
             return row
 
     async def get_latest_audit_row(self) -> AuditLog | None:
+        """Return latest audit row by sequence id."""
         async with self.session_factory() as session:
             query = select(AuditLog).order_by(AuditLog.id.desc()).limit(1)
             result = await session.execute(query)
             return result.scalar_one_or_none()
 
     async def list_audit_rows(self) -> list[AuditLog]:
+        """Return full audit chain ordered by id ascending."""
         async with self.session_factory() as session:
             query = select(AuditLog).order_by(AuditLog.id.asc())
             result = await session.execute(query)
             return list(result.scalars().all())
 
     async def count_jobs_by_status(self, status: str) -> int:
+        """Return number of jobs with a given status."""
         async with self.session_factory() as session:
             query = select(ProofJob).where(ProofJob.status == status)
             result = await session.execute(query)
@@ -201,6 +240,8 @@ class Database:
 
 
 class DatabaseSession:
+    """Lightweight async context manager around session factory."""
+
     def __init__(self, db: Database) -> None:
         self.db = db
 
@@ -213,10 +254,12 @@ class DatabaseSession:
 
 
 def _utc_now() -> datetime:
+    """Return timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
 
 
 def _normalize_audit_payload(payload: AuditAppendInput | dict[str, Any]) -> AuditAppendInput:
+    """Normalize dict payloads to AuditAppendInput dataclass."""
     if isinstance(payload, AuditAppendInput):
         return payload
     return AuditAppendInput(

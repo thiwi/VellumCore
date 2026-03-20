@@ -16,6 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """Create initial proof_jobs and audit_log tables."""
     op.create_table(
         "proof_jobs",
         sa.Column("proof_id", sa.String(length=64), primary_key=True),
@@ -52,5 +53,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop initial schema tables."""
     op.drop_table("audit_log")
     op.drop_table("proof_jobs")

@@ -1,3 +1,5 @@
+"""Signed audit-chain persistence and integrity verification utilities."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,6 +15,8 @@ from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 
 
 class AuditRow(Protocol):
+    """Shape required from persisted audit rows."""
+
     id: int
     timestamp: datetime
     proof_id: str | None
@@ -29,12 +33,16 @@ class AuditRow(Protocol):
 
 
 class AuditStoreDB(Protocol):
+    """Storage interface required by audit store and integrity checker."""
+
     async def get_latest_audit_row(self) -> AuditRow | None: ...
     async def append_audit_row(self, payload: dict[str, Any]) -> AuditRow: ...
     async def list_audit_rows(self) -> list[AuditRow]: ...
 
 
 class VellumAuditStore:
+    """Writes signed, hash-linked audit events."""
+
     def __init__(
         self,
         *,
@@ -57,6 +65,7 @@ class VellumAuditStore:
         metadata: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> dict[str, Any]:
+        """Append one event to audit chain with optimistic conflict retry."""
         metadata_payload = metadata or {}
         proof_hash = _compute_proof_hash(proof_payload)
         row = None
@@ -124,6 +133,8 @@ class VellumAuditStore:
 
 
 class VellumIntegrityService:
+    """Verifies integrity of persisted audit chain."""
+
     def __init__(
         self,
         *,
@@ -136,6 +147,7 @@ class VellumIntegrityService:
         self.audit_key_name = audit_key_name
 
     async def verify_chain(self) -> dict[str, Any]:
+        """Validate hash links and signatures for full audit log."""
         rows = await self.db.list_audit_rows()
         previous_entry_hash = ""
 
@@ -190,6 +202,7 @@ class VellumIntegrityService:
 
 
 def _invalid_chain(*, checked_entries: int, first_broken_index: int, reason: str) -> dict[str, Any]:
+    """Build standardized invalid-chain report payload."""
     return {
         "valid": False,
         "checked_entries": checked_entries,
@@ -199,11 +212,13 @@ def _invalid_chain(*, checked_entries: int, first_broken_index: int, reason: str
 
 
 def _hash_record(record: dict[str, Any]) -> str:
+    """Hash one canonicalized JSON record with SHA-256."""
     serialized = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _compute_proof_hash(proof_payload: dict[str, Any] | None) -> str:
+    """Compute deterministic proof payload hash used in audit entries."""
     if proof_payload is None:
         return ""
     serialized = json.dumps(proof_payload, sort_keys=True, separators=(",", ":"))
@@ -211,6 +226,7 @@ def _compute_proof_hash(proof_payload: dict[str, Any] | None) -> str:
 
 
 def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: bytes) -> bool:
+    """Verify Ed25519 signature against payload bytes."""
     try:
         key = _load_ed25519_public_key(public_key_pem)
         key.verify(signature, payload)
@@ -220,6 +236,7 @@ def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: by
 
 
 def _load_ed25519_public_key(public_key_value: str) -> Ed25519PublicKey:
+    """Load Ed25519 public key from PEM or raw base64 format."""
     try:
         key = load_pem_public_key(public_key_value.encode("utf-8"))
         if isinstance(key, Ed25519PublicKey):

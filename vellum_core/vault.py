@@ -1,3 +1,5 @@
+"""Vault Transit client and public-key cache helpers."""
+
 from __future__ import annotations
 
 import base64
@@ -14,18 +16,23 @@ _VAULT_SIG_PATTERN = re.compile(r"^vault:v(?P<version>\d+):(?P<sig>.+)$")
 
 @dataclass(frozen=True)
 class VaultSignature:
+    """Decoded Vault Transit signature and metadata."""
+
     raw: bytes
     encoded: str
     key_version: str
 
 
 class VaultTransitClient:
+    """Minimal async client for Vault Transit signing and key retrieval."""
+
     def __init__(self, *, addr: str, token: str, timeout: float = 5.0) -> None:
         self.addr = addr.rstrip("/")
         self.token = token
         self.timeout = timeout
 
     async def sign(self, key_name: str, payload: bytes) -> VaultSignature:
+        """Sign bytes with transit key and return structured signature data."""
         data = {"input": base64.b64encode(payload).decode("utf-8")}
         body = await self._request("POST", f"/v1/transit/sign/{key_name}", json=data)
         signature = body["data"]["signature"]
@@ -33,6 +40,7 @@ class VaultTransitClient:
         return VaultSignature(raw=raw, encoded=signature, key_version=key_version)
 
     async def read_public_keys(self, key_name: str) -> dict[str, str]:
+        """Return Vault public keys keyed by key version."""
         body = await self._request("GET", f"/v1/transit/keys/{key_name}")
         keys = body.get("data", {}).get("keys", {})
         result: dict[str, str] = {}
@@ -43,6 +51,7 @@ class VaultTransitClient:
         return result
 
     async def read_latest_public_key(self, key_name: str) -> tuple[str, str]:
+        """Return latest `(version, public_key)` pair for a key."""
         keys = await self.read_public_keys(key_name)
         if not keys:
             raise ValueError(f"Vault key '{key_name}' has no public keys")
@@ -50,6 +59,7 @@ class VaultTransitClient:
         return latest_version, keys[latest_version]
 
     async def _request(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute an authenticated Vault HTTP request and decode JSON body."""
         headers = {"X-Vault-Token": self.token}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.request(method, f"{self.addr}{path}", headers=headers, json=json)
@@ -58,6 +68,7 @@ class VaultTransitClient:
 
     @staticmethod
     def decode_signature(signature: str) -> tuple[bytes, str]:
+        """Decode transit signature format `vault:vN:<base64>` with backward fallback."""
         matched = _VAULT_SIG_PATTERN.match(signature)
         if matched is not None:
             key_version = matched.group("version")
@@ -69,6 +80,8 @@ class VaultTransitClient:
 
 
 class VaultPublicKeyCache:
+    """TTL cache around Vault public-key lookups by key name/version."""
+
     def __init__(
         self,
         *,
@@ -80,6 +93,7 @@ class VaultPublicKeyCache:
         self._cache: dict[str, tuple[float, dict[str, str]]] = {}
 
     async def get_public_key(self, *, key_name: str, key_version: str | None = None) -> str:
+        """Return a public key value for requested version (or latest)."""
         versions = await self._get_versions(key_name)
         if not versions:
             raise ValueError(f"No public keys found in Vault for key '{key_name}'")

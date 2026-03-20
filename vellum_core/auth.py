@@ -1,3 +1,5 @@
+"""JWT and bank-handshake authentication primitives for reference services."""
+
 from __future__ import annotations
 
 import base64
@@ -23,6 +25,8 @@ BEARER_SCHEME = HTTPBearer(auto_error=False)
 
 
 class RedisNonceReplayGuard:
+    """Reject replayed or stale bank handshakes using Redis NX+TTL keys."""
+
     def __init__(self, *, redis_url: str, window_seconds: int) -> None:
         self.window_seconds = window_seconds
         self.redis = Redis.from_url(redis_url, decode_responses=True)
@@ -49,6 +53,8 @@ class RedisNonceReplayGuard:
 
 
 class VaultJWTSigner:
+    """Create EdDSA JWTs using Vault Transit signing keys."""
+
     def __init__(
         self,
         *,
@@ -83,6 +89,8 @@ class VaultJWTSigner:
 
 
 class AuthManager:
+    """Central auth facade for JWT validation and bank request handshake checks."""
+
     def __init__(
         self,
         *,
@@ -109,6 +117,7 @@ class AuthManager:
     async def verify_jwt_credentials(
         self, credentials: HTTPAuthorizationCredentials | None
     ) -> dict[str, Any]:
+        """Validate bearer token and return claims payload."""
         if credentials is None:
             raise APIError(
                 status_code=401,
@@ -137,6 +146,7 @@ class AuthManager:
         return claims
 
     async def verify_handshake(self, request: Request, raw_body: bytes) -> None:
+        """Validate bank headers, signature, and replay protection for request body."""
         key_id = request.headers.get("X-Bank-Key-Id")
         timestamp_raw = request.headers.get("X-Bank-Timestamp")
         nonce = request.headers.get("X-Bank-Nonce")
@@ -210,6 +220,7 @@ class AuthManager:
         nonce: str,
         raw_body: bytes,
     ) -> str:
+        """Build deterministic signed string used by both producer and verifier."""
         body_hash = hashlib.sha256(raw_body).hexdigest()
         return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
 
@@ -232,6 +243,7 @@ class AuthManager:
 
 
 def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: bytes) -> bool:
+    """Return True when signature verifies for payload under provided key."""
     try:
         key = _load_ed25519_public_key(public_key_pem)
         key.verify(signature, payload)
@@ -241,6 +253,7 @@ def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: by
 
 
 def _load_ed25519_public_key(public_key_value: str) -> Ed25519PublicKey:
+    """Load Ed25519 key from PEM or raw base64 key material."""
     try:
         key = load_pem_public_key(public_key_value.encode("utf-8"))
         if isinstance(key, Ed25519PublicKey):
@@ -254,4 +267,5 @@ def _load_ed25519_public_key(public_key_value: str) -> Ed25519PublicKey:
 
 
 def _b64url_encode(raw: bytes) -> str:
+    """Encode bytes to unpadded base64url string."""
     return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")

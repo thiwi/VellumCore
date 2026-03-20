@@ -1,3 +1,5 @@
+"""Batching helpers for circuit-friendly private input construction."""
+
 from vellum_core.logic.batcher import (
     MAX_BATCH_SIZE,
     PreparedBatchInput,

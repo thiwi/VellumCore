@@ -1,3 +1,5 @@
+"""Reference verifier service for proof checks, circuits, and audit integrity."""
+
 from __future__ import annotations
 
 import time
@@ -8,10 +10,11 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 
+from vellum_core.api.types import VerificationRequest as EngineVerificationRequest
 from vellum_core.auth import AuthManager, BEARER_SCHEME
 from vellum_core.config import Settings
 from vellum_core.database import Database
-from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.errors import register_exception_handlers
 from vellum_core.metrics import (
     observe_verify_duration,
     prometheus_payload,
@@ -19,10 +22,10 @@ from vellum_core.metrics import (
     trust_speed_snapshot,
 )
 from vellum_core.proof_store import VellumAuditStore, VellumIntegrityService
-from vellum_core.providers import SnarkJSProvider
-from vellum_core.registry import CircuitNotFoundError, CircuitRegistry
+from vellum_core.runtime import build_framework_client
 from vellum_core.schemas import (
     AuditChainVerifyResponse,
+    CircuitsResponse,
     HealthResponse,
     TrustSpeedResponse,
     VerifyRequest,
@@ -33,8 +36,7 @@ from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 
 settings = Settings.from_env()
 db = Database(settings.database_url)
-registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
-provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
+framework = build_framework_client(settings)
 vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
 key_cache = VaultPublicKeyCache(
     client=vault_client,
@@ -61,12 +63,13 @@ integrity_service = VellumIntegrityService(
     audit_key_name=settings.vault_audit_key,
 )
 
-app = FastAPI(title="Vellum Verifier Service", version="3.0.0")
+app = FastAPI(title="Vellum Verifier Service", version="4.0.0")
 register_exception_handlers(app)
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    """Initialize schema and baseline metrics at startup."""
     await db.init_models()
     set_native_baseline(settings.native_verify_baseline_seconds)
 
@@ -74,16 +77,19 @@ async def startup_event() -> None:
 async def require_jwt(
     credentials: HTTPAuthorizationCredentials | None = Depends(BEARER_SCHEME),
 ) -> dict[str, Any]:
+    """FastAPI dependency that validates bearer JWT."""
     return await auth_manager.verify_jwt_credentials(credentials)
 
 
 @app.get("/healthz", response_model=HealthResponse)
 async def healthcheck() -> HealthResponse:
+    """Liveness/readiness endpoint."""
     return HealthResponse(status="ok")
 
 
 @app.get("/metrics")
 async def metrics() -> Response:
+    """Prometheus metrics endpoint."""
     payload, content_type = prometheus_payload()
     return Response(content=payload, media_type=content_type)
 
@@ -93,40 +99,45 @@ async def verify(
     payload: VerifyRequest,
     _: dict[str, Any] = Depends(require_jwt),
 ) -> VerifyResponse:
-    try:
-        registry.get_manifest(payload.circuit_id)
-    except CircuitNotFoundError as exc:
-        raise APIError(
-            status_code=404,
-            code="unknown_circuit",
-            message="Circuit id not found",
-            details={"circuit_id": payload.circuit_id},
-        ) from exc
-
-    await provider.ensure_artifacts(payload.circuit_id)
+    """Verify a proof tuple and append verification event to audit chain."""
     started = time.perf_counter()
-    valid = await provider.verify_proof(
-        circuit_id=payload.circuit_id,
-        proof=payload.proof,
-        public_signals=payload.public_signals,
+    result = await framework.proof_engine.verify(
+        EngineVerificationRequest(
+            circuit_id=payload.circuit_id,
+            proof=payload.proof,
+            public_signals=payload.public_signals,
+        )
     )
     verify_seconds = time.perf_counter() - started
-    verification_ms = verify_seconds * 1000.0
+    verification_ms = result.verification_ms
     observe_verify_duration(verify_seconds)
 
     await audit_store.append_event(
         proof_id=None,
         circuit_id=payload.circuit_id,
         public_signals=payload.public_signals,
-        status="completed" if valid else "failed",
+        status="completed" if result.valid else "failed",
         proof_payload=payload.proof,
-        metadata={"event": "verification", "result": "valid" if valid else "invalid"},
+        metadata={"event": "verification", "result": "valid" if result.valid else "invalid"},
     )
 
     return VerifyResponse(
-        valid=valid,
+        valid=result.valid,
         verified_at=datetime.now(timezone.utc),
         verification_ms=verification_ms,
+    )
+
+
+@app.get("/v1/circuits", response_model=CircuitsResponse)
+async def list_circuits(
+    _: dict[str, Any] = Depends(require_jwt),
+) -> CircuitsResponse:
+    """Return circuit artifact readiness list from framework manager."""
+    return CircuitsResponse(
+        circuits=[
+            entry.model_dump()
+            for entry in framework.circuit_manager.list_with_validation()
+        ]
     )
 
 
@@ -134,6 +145,7 @@ async def verify(
 async def verify_audit_chain(
     _: dict[str, Any] = Depends(require_jwt),
 ) -> AuditChainVerifyResponse:
+    """Verify full audit-chain integrity."""
     report = await integrity_service.verify_chain()
     return AuditChainVerifyResponse.model_validate(report)
 
@@ -142,6 +154,7 @@ async def verify_audit_chain(
 async def trust_speed(
     _: dict[str, Any] = Depends(require_jwt),
 ) -> TrustSpeedResponse:
+    """Return trust-speed snapshot from verification metrics."""
     return TrustSpeedResponse.model_validate(trust_speed_snapshot())
 
 

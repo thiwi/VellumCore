@@ -1,3 +1,5 @@
+"""Reference Celery worker for asynchronous proof-job execution."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,30 +11,27 @@ from pathlib import Path
 from celery.signals import worker_ready
 from prometheus_client import start_http_server
 
-from vellum_core.adapters import MainframeAdapter
+from vellum_core.api.types import ProofGenerationRequest
 from vellum_core.celery_app import celery_app
 from vellum_core.config import Settings
 from vellum_core.database import Database
-from vellum_core.logic.batcher import batch_prepare_from_private_input, batch_prepare_input
+from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_from_private_input, batch_prepare_input
 from vellum_core.metrics import observe_proof_duration
 from vellum_core.proof_store import VellumAuditStore
-from vellum_core.providers import SnarkJSProvider
-from vellum_core.registry import CircuitRegistry
+from vellum_core.runtime import build_framework_client
 from vellum_core.vault import VaultTransitClient
 
-
-BATCH_CIRCUIT_ID = "batch_credit_check"
+from vellum_core.schemas import DEFAULT_BATCH_CIRCUIT_ID
 
 settings = Settings.from_env()
-registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
-provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
-adapter = MainframeAdapter()
+framework = build_framework_client(settings)
 
 _METRICS_STARTED = False
 
 
 @worker_ready.connect
 def _start_metrics_server(**_: object) -> None:
+    """Start worker metrics endpoint once per worker process."""
     global _METRICS_STARTED
     if not _METRICS_STARTED:
         start_http_server(settings.worker_metrics_port)
@@ -41,11 +40,13 @@ def _start_metrics_server(**_: object) -> None:
 
 @celery_app.task(name="worker.process_proof_job")
 def process_proof_job(proof_id: str) -> str:
+    """Celery task entrypoint delegating to async job processor."""
     asyncio.run(_process_proof_job_async(proof_id))
     return proof_id
 
 
 async def _process_proof_job_async(proof_id: str) -> None:
+    """Execute full proof-job lifecycle and persist state/audit transitions."""
     db = Database(settings.database_url)
     vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
     audit_store = VellumAuditStore(
@@ -64,7 +65,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
     await db.update_proof_job(proof_id=proof_id, status="running")
     await audit_store.append_event(
         proof_id=proof_id,
-        circuit_id=BATCH_CIRCUIT_ID,
+        circuit_id=job.circuit_id,
         status="running",
         public_signals=[],
         metadata=job.meta,
@@ -73,16 +74,27 @@ async def _process_proof_job_async(proof_id: str) -> None:
     started = time.perf_counter()
     try:
         if job.source_ref is not None:
-            mapped = await adapter.fetch_credit_batch(job.source_ref)
-            prepared = batch_prepare_input(balances=mapped.balances, limits=mapped.limits)
+            if job.circuit_id != DEFAULT_BATCH_CIRCUIT_ID:
+                raise ValueError(
+                    "source_ref mode is only supported for circuit_id=batch_credit_check"
+                )
+            balances, limits = await framework.input_adapter.fetch_credit_batch(
+                source_ref=job.source_ref,
+                batch_size=MAX_BATCH_SIZE,
+            )
+            prepared = batch_prepare_input(balances=balances, limits=limits)
+            private_input = prepared.to_circuit_input()
         else:
             if job.private_input is None:
                 raise ValueError("Missing private_input for direct mode proof job")
-            prepared = batch_prepare_from_private_input(job.private_input)
-
-        private_input = prepared.to_circuit_input()
-        await provider.ensure_artifacts(BATCH_CIRCUIT_ID)
-        result = await provider.generate_proof(BATCH_CIRCUIT_ID, private_input)
+            if job.circuit_id == DEFAULT_BATCH_CIRCUIT_ID:
+                prepared = batch_prepare_from_private_input(job.private_input)
+                private_input = prepared.to_circuit_input()
+            else:
+                private_input = job.private_input
+        result = await framework.proof_engine.generate(
+            ProofGenerationRequest(circuit_id=job.circuit_id, private_input=private_input)
+        )
 
         proof_output_dir = Path(settings.proof_output_dir)
         proof_output_dir.mkdir(parents=True, exist_ok=True)
@@ -109,7 +121,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
 
         await audit_store.append_event(
             proof_id=proof_id,
-            circuit_id=BATCH_CIRCUIT_ID,
+            circuit_id=job.circuit_id,
             status="completed",
             public_signals=result.public_signals,
             proof_payload=result.proof,
@@ -123,7 +135,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
         )
         await audit_store.append_event(
             proof_id=proof_id,
-            circuit_id=BATCH_CIRCUIT_ID,
+            circuit_id=job.circuit_id,
             status="failed",
             public_signals=[],
             metadata=job.meta,

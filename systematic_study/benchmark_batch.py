@@ -1,3 +1,5 @@
+"""Micro-benchmark: native batch checks versus one batch-proof verification."""
+
 from __future__ import annotations
 
 import argparse
@@ -17,11 +19,14 @@ BATCH_CIRCUIT_ID = "batch_credit_check"
 
 @dataclass(frozen=True)
 class CreditDecision:
+    """Synthetic credit decision row used for benchmark generation."""
+
     balance: int
     limit: int
 
 
 def generate_decisions(count: int, *, seed: int) -> list[CreditDecision]:
+    """Generate deterministic valid decisions for benchmark consistency."""
     rng = random.Random(seed)
     decisions: list[CreditDecision] = []
     for _ in range(count):
@@ -33,6 +38,7 @@ def generate_decisions(count: int, *, seed: int) -> list[CreditDecision]:
 
 
 def format_table(rows: list[tuple[str, str]]) -> str:
+    """Render aligned ASCII table for CLI benchmark output."""
     col_a = max(len(k) for k, _ in rows)
     col_b = max(len(v) for _, v in rows)
     divider = f"+-{'-' * col_a}-+-{'-' * col_b}-+"
@@ -44,6 +50,7 @@ def format_table(rows: list[tuple[str, str]]) -> str:
 
 
 async def run_benchmark(*, seed: int) -> None:
+    """Execute end-to-end benchmark and print summarized timings."""
     settings = Settings.from_env()
     registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
     provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
@@ -92,6 +99,7 @@ async def run_benchmark(*, seed: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse benchmark CLI arguments."""
     parser = argparse.ArgumentParser(
         description=f"Benchmark native {MAX_BATCH_SIZE} checks vs single batch proof verification."
     )

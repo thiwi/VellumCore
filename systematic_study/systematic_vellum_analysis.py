@@ -1,3 +1,5 @@
+"""Systematic scalability matrix runner for Vellum performance and pivot evidence."""
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +35,8 @@ DEFAULT_OPS = [0, 1_000, 5_000, 10_000]
 
 @dataclass(frozen=True)
 class MatrixRow:
+    """One matrix cell result for `(transaction_volume, logic_ops)`."""
+
     n: int
     ops: int
     native_time_ms: float | None
@@ -51,6 +55,7 @@ class MatrixRow:
 
 
 def heavy_risk_logic(balance: int, limit: int, iterations: int = 1000) -> bool:
+    """CPU-heavy native risk simulation used as baseline workload."""
     score = float(balance)
     for i in range(iterations):
         safe_score = score if score > 0.0 else 0.0
@@ -62,6 +67,7 @@ def heavy_risk_logic(balance: int, limit: int, iterations: int = 1000) -> bool:
 
 
 def parse_int_csv(raw: str) -> list[int]:
+    """Parse comma-separated integer CLI values."""
     values = [int(part.strip()) for part in raw.split(",") if part.strip()]
     if not values:
         raise ValueError("At least one numeric value required")
@@ -69,6 +75,7 @@ def parse_int_csv(raw: str) -> list[int]:
 
 
 def render_table(headers: list[str], rows: list[list[str]]) -> str:
+    """Render aligned ASCII table output."""
     widths = [len(h) for h in headers]
     for row in rows:
         for idx, value in enumerate(row):
@@ -84,6 +91,7 @@ def render_table(headers: list[str], rows: list[list[str]]) -> str:
 
 
 def fmt_ms(value: float | None) -> str:
+    """Format optional millisecond value for table output."""
     if value is None:
         return "-"
     if value < 1_000:
@@ -92,6 +100,7 @@ def fmt_ms(value: float | None) -> str:
 
 
 def progress_iter(items: list[tuple[int, int]]) -> Iterable[tuple[int, int]]:
+    """Yield progress iterator using tqdm when available, fallback otherwise."""
     total = len(items)
     try:
         from tqdm import tqdm  # type: ignore
@@ -108,6 +117,7 @@ def progress_iter(items: list[tuple[int, int]]) -> Iterable[tuple[int, int]]:
 
 
 def build_decisions(*, n: int, seed: int) -> tuple[list[int], list[int]]:
+    """Build deterministic valid decision arrays for native and ZK benchmarking."""
     rng = random.Random(seed + n * 17)
     balances: list[int] = []
     limits: list[int] = []
@@ -120,6 +130,7 @@ def build_decisions(*, n: int, seed: int) -> tuple[list[int], list[int]]:
 
 
 def measure_native_time_ms(*, balances: list[int], limits: list[int], ops: int) -> float:
+    """Measure native processing time for one `(balances, limits, ops)` workload."""
     started = time.perf_counter()
     valid = 0
     for balance, limit in zip(balances, limits):
@@ -134,6 +145,7 @@ def measure_native_time_ms(*, balances: list[int], limits: list[int], ops: int) 
 
 
 def split_into_batches(*, balances: list[int], limits: list[int]) -> list[dict[str, Any]]:
+    """Split decision arrays into fixed-size circuit-ready batch payloads."""
     payloads: list[dict[str, Any]] = []
     for start in range(0, len(balances), MAX_BATCH_SIZE):
         batch_balances = balances[start : start + MAX_BATCH_SIZE]
@@ -144,6 +156,7 @@ def split_into_batches(*, balances: list[int], limits: list[int]) -> list[dict[s
 
 
 async def check_vault_unsealed(*, vault_addr: str, vault_token: str) -> None:
+    """Ensure Vault is reachable and unsealed before benchmark start."""
     url = f"{vault_addr.rstrip('/')}/v1/sys/health"
     headers = {"X-Vault-Token": vault_token}
     async with httpx.AsyncClient(timeout=5.0) as client:
@@ -155,6 +168,7 @@ async def check_vault_unsealed(*, vault_addr: str, vault_token: str) -> None:
 
 
 async def check_database_reachable(db: Database) -> None:
+    """Execute simple probe query against configured database."""
     async with db.session_factory() as session:
         await session.execute(text("SELECT 1"))
 
@@ -168,6 +182,7 @@ async def enqueue_jobs(
     ops: int,
     payloads: list[dict[str, Any]],
 ) -> tuple[list[str], float]:
+    """Create queued proof jobs for all batch payloads and return DB overhead."""
     proof_ids: list[str] = []
     db_overhead_ms = 0.0
 
@@ -208,6 +223,7 @@ async def wait_for_jobs(
     timeout_seconds: float,
     poll_interval: float,
 ) -> tuple[list[ProofJob], list[ProofJob], float]:
+    """Wait for proof jobs to finish and return completed/failed plus DB polling overhead."""
     pending = set(proof_ids)
     completed: list[ProofJob] = []
     failed: list[ProofJob] = []
@@ -248,6 +264,7 @@ async def measure_single_verify_ms(
     public_signals: list[Any],
     repeats: int,
 ) -> float:
+    """Return average verification latency for one proof payload in milliseconds."""
     durations: list[float] = []
     for _ in range(repeats):
         started = time.perf_counter()
@@ -265,6 +282,7 @@ async def measure_vault_sign_latency_ms(
     key_name: str,
     samples: int,
 ) -> float:
+    """Measure average Vault sign latency in milliseconds."""
     durations: list[float] = []
     for idx in range(samples):
         payload = f"matrix-sign-{idx}-{time.time_ns()}".encode("utf-8")
@@ -275,6 +293,7 @@ async def measure_vault_sign_latency_ms(
 
 
 def build_pivot_summary(rows: list[MatrixRow], ops_values: list[int]) -> list[dict[str, Any]]:
+    """Compute first matrix pivot point per ops profile where auditor speedup exceeds 1x."""
     result: list[dict[str, Any]] = []
     for ops in ops_values:
         candidates = [
@@ -312,6 +331,7 @@ def build_pivot_summary(rows: list[MatrixRow], ops_values: list[int]) -> list[di
 
 
 async def run() -> None:
+    """Run full matrix benchmark and emit JSON/CSV outputs."""
     args = parse_args()
     volumes = parse_int_csv(args.volumes)
     ops_values = parse_int_csv(args.ops)
@@ -613,6 +633,7 @@ async def run() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for matrix benchmark execution."""
     parser = argparse.ArgumentParser(
         description="Run a systemic scalability matrix for Vellum and export JSON/CSV raw data."
     )

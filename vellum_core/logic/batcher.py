@@ -1,3 +1,5 @@
+"""Batch input validation, normalization, and anti-ghost padding invariants."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,11 +12,14 @@ MAX_UINT32 = 4_294_967_295
 
 @dataclass(frozen=True)
 class PreparedBatchInput:
+    """Normalized and padded batch payload for the batch credit-check circuit."""
+
     balances: list[int]
     limits: list[int]
     active_count: int
 
     def to_circuit_input(self) -> dict[str, object]:
+        """Render to circuit input object expected by proving backends."""
         return {
             "balances": self.balances,
             "limits": self.limits,
@@ -25,6 +30,7 @@ class PreparedBatchInput:
 def batch_prepare_input(
     *, balances: list[int], limits: list[int], batch_size: int = MAX_BATCH_SIZE
 ) -> PreparedBatchInput:
+    """Validate and zero-pad balance/limit arrays to fixed-size batch input."""
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
     if len(balances) == 0 or len(limits) == 0:
@@ -53,6 +59,7 @@ def batch_prepare_input(
 
 
 def batch_prepare_from_private_input(private_input: dict[str, Any]) -> PreparedBatchInput:
+    """Validate an already padded private_input object and enforce anti-ghost rows."""
     balances_raw = private_input.get("balances")
     limits_raw = private_input.get("limits")
     active_count_raw = private_input.get("active_count")
@@ -83,6 +90,7 @@ def batch_prepare_from_private_input(private_input: dict[str, Any]) -> PreparedB
 
 
 def _assert_zero_tail(values: list[int], active_count: int) -> None:
+    """Ensure padded rows are deterministic zero rows after active_count."""
     for idx, value in enumerate(values[active_count:], start=active_count):
         if value != 0:
             raise ValueError(
@@ -91,6 +99,7 @@ def _assert_zero_tail(values: list[int], active_count: int) -> None:
 
 
 def _validate_u32_list(field_name: str, values: list[int]) -> None:
+    """Ensure all values are integers inside Circom-friendly uint32 range."""
     for idx, value in enumerate(values):
         if not isinstance(value, int):
             raise ValueError(f"{field_name}[{idx}] must be an integer")

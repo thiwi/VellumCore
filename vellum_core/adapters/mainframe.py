@@ -1,3 +1,5 @@
+"""Deterministic stand-in adapter for legacy mainframe credit sources."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +11,8 @@ from vellum_core.logic.batcher import MAX_BATCH_SIZE
 
 @dataclass(frozen=True)
 class MainframeBatchSignals:
+    """Normalized batch payload returned by the mainframe adapter."""
+
     balances: list[int]
     limits: list[int]
 

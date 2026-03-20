@@ -1,3 +1,5 @@
+"""Prometheus metric definitions and trust-speed helper calculations."""
+
 from __future__ import annotations
 
 from threading import Lock
@@ -27,10 +29,12 @@ _native_baseline_seconds = 0.0
 
 
 def observe_proof_duration(seconds: float) -> None:
+    """Record one proving duration sample in Prometheus histogram."""
     vellum_proof_duration_seconds.observe(seconds)
 
 
 def observe_verify_duration(seconds: float) -> None:
+    """Record one verification duration sample and update in-memory aggregate."""
     global _verify_total_seconds, _verify_count
     vellum_verify_duration_seconds.observe(seconds)
     with _METRIC_LOCK:
@@ -39,6 +43,7 @@ def observe_verify_duration(seconds: float) -> None:
 
 
 def set_native_baseline(seconds: float) -> None:
+    """Set native verification baseline used for trust-speed calculations."""
     global _native_baseline_seconds
     vellum_native_verify_duration_seconds.set(seconds)
     with _METRIC_LOCK:
@@ -46,6 +51,7 @@ def set_native_baseline(seconds: float) -> None:
 
 
 def trust_speed_snapshot() -> dict[str, float | None]:
+    """Return current native-vs-ZK verification timing comparison snapshot."""
     with _METRIC_LOCK:
         avg_verify_seconds = (
             _verify_total_seconds / _verify_count if _verify_count > 0 else None
@@ -67,4 +73,5 @@ def trust_speed_snapshot() -> dict[str, float | None]:
 
 
 def prometheus_payload() -> tuple[bytes, str]:
+    """Render scrape payload and content type for Prometheus endpoint."""
     return generate_latest(), CONTENT_TYPE_LATEST

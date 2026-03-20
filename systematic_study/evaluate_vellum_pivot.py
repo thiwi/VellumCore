@@ -1,3 +1,5 @@
+"""Benchmark utility to locate pivot where batch verification beats native auditing."""
+
 from __future__ import annotations
 
 import argparse
@@ -51,6 +53,8 @@ def heavy_risk_logic(balance: int, limit: int, iterations: int = 1000) -> bool:
 
 @dataclass(frozen=True)
 class NativeTiming:
+    """Native timing sample including extrapolation metadata."""
+
     total_seconds: float
     per_decision_seconds: float
     measured: bool
@@ -58,6 +62,8 @@ class NativeTiming:
 
 @dataclass(frozen=True)
 class RowResult:
+    """One result row for a transaction-count benchmark point."""
+
     n: int
     native_seconds: float
     vellum_verify_seconds: float
@@ -68,6 +74,8 @@ class RowResult:
 
 
 class NativeTimer:
+    """Measures native workload directly and extrapolates for large N when configured."""
+
     def __init__(
         self,
         *,
@@ -83,6 +91,7 @@ class NativeTimer:
         self._per_decision_cache: dict[str, float] = {}
 
     def measure(self, mode: str, n: int) -> NativeTiming:
+        """Return native timing for mode/light-heavy and transaction volume."""
         mode_key = mode.lower()
         if mode_key not in {"light", "heavy"}:
             raise ValueError(f"Unsupported mode: {mode}")
@@ -111,6 +120,7 @@ class NativeTimer:
         )
 
     def _measure_exact(self, mode: str, n: int) -> float:
+        """Run exact native simulation loop and return elapsed seconds."""
         rng = random.Random(self.seed + n + (17 if mode == "heavy" else 3))
         started = time.perf_counter()
 
@@ -131,6 +141,7 @@ class NativeTimer:
         return time.perf_counter() - started
 
     def _heavy_check(self, balance: int, limit: int) -> bool:
+        """Execute heavy business-logic simulation branch."""
         return heavy_risk_logic(balance, limit, self.heavy_ops)
 
 
@@ -138,6 +149,7 @@ async def fetch_vault_key_versions(
     vault: VaultTransitClient,
     key_names: list[str],
 ) -> dict[str, list[str]]:
+    """Fetch available Vault public-key versions for supplied key names."""
     versions: dict[str, list[str]] = {}
     for key_name in key_names:
         keys = await vault.read_public_keys(key_name)
@@ -146,6 +158,7 @@ async def fetch_vault_key_versions(
 
 
 def build_valid_batch_input(seed: int) -> dict[str, Any]:
+    """Build deterministic valid batch payload compatible with batch circuit."""
     rng = random.Random(seed)
     balances: list[int] = []
     limits: list[int] = []
@@ -171,6 +184,7 @@ async def enqueue_benchmark_jobs(
     batches: int,
     private_input: dict[str, Any],
 ) -> list[str]:
+    """Create and enqueue calibration jobs used for proving throughput measurement."""
     proof_ids: list[str] = []
     for i in range(batches):
         proof_id = str(uuid4())
@@ -212,6 +226,7 @@ async def wait_for_jobs(
     poll_interval: float,
     timeout_seconds: float,
 ) -> tuple[list[ProofJob], list[ProofJob]]:
+    """Wait until all queued calibration jobs are completed or failed."""
     pending = set(proof_ids)
     completed: list[ProofJob] = []
     failed: list[ProofJob] = []
@@ -249,6 +264,7 @@ async def measure_verification_seconds(
     public_signals: list[Any],
     repeats: int,
 ) -> float:
+    """Average repeated verification calls for one proof/public-signal tuple."""
     durations: list[float] = []
     for _ in range(repeats):
         started = time.perf_counter()
@@ -271,6 +287,7 @@ def compute_pivot(
     verify_per_batch: float,
     max_n: int,
 ) -> int | None:
+    """Return first N where modeled native cost exceeds batched verification cost."""
     for n in range(1, max_n + 1):
         native = n * native_per_decision
         vellum = math.ceil(n / MAX_BATCH_SIZE) * verify_per_batch
@@ -280,6 +297,7 @@ def compute_pivot(
 
 
 def render_table(headers: list[str], rows: list[list[str]]) -> str:
+    """Render aligned ASCII table from headers/rows."""
     widths = [len(h) for h in headers]
     for row in rows:
         for idx, value in enumerate(row):
@@ -300,6 +318,7 @@ def render_table(headers: list[str], rows: list[list[str]]) -> str:
 
 
 def format_seconds(value: float) -> str:
+    """Format seconds into human-readable ms/s/min/h string."""
     if value < 1:
         return f"{value * 1000:.3f} ms"
     if value < 60:
@@ -310,6 +329,7 @@ def format_seconds(value: float) -> str:
 
 
 async def run() -> None:
+    """Execute full pivot benchmark workflow and print summary tables."""
     args = parse_args()
     tx_counts = [int(part.strip()) for part in args.tx_counts.split(",") if part.strip()]
     if tx_counts != sorted(tx_counts):
@@ -593,6 +613,7 @@ async def run() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for pivot benchmark execution."""
     parser = argparse.ArgumentParser(
         description=(
             "Evaluate the Vellum pivot point where batch O(1) verification per proof "

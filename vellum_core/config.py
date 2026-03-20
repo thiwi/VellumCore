@@ -1,3 +1,5 @@
+"""Environment-driven runtime settings used across services and framework."""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +10,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
+    """Runtime settings model loaded from process environment."""
+
     app_name: str
     circuits_dir: Path
     shared_assets_dir: Path
@@ -38,6 +42,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        """Build validated settings with defaults suitable for local/dev execution."""
         base_dir = Path(os.getenv("APP_BASE_DIR", Path.cwd()))
         circuits_dir = Path(os.getenv("CIRCUITS_DIR", str(base_dir / "circuits")))
         shared_assets_dir = Path(

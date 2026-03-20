@@ -1,17 +1,18 @@
+"""Abstract provider contract helpers used by concrete ZK backends."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any
 
+from vellum_core.spi import ProofProvider, ProviderProofResult
 
-@dataclass(frozen=True)
-class ProofResult:
-    proof: dict[str, Any]
-    public_signals: list[Any]
+ProofResult = ProviderProofResult
 
 
-class ZKProvider(ABC):
+class ZKProvider(ProofProvider, ABC):
+    """Abstract base class for zero-knowledge provider implementations."""
+
     @abstractmethod
     async def generate_proof(
         self, circuit_id: str, private_input: dict[str, Any]
@@ -27,4 +28,3 @@ class ZKProvider(ABC):
     @abstractmethod
     async def ensure_artifacts(self, circuit_id: str) -> None:
         raise NotImplementedError
-

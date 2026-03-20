@@ -1,3 +1,5 @@
+"""Comparison benchmark: native recalculation versus per-item ZK verification."""
+
 from __future__ import annotations
 
 import argparse
@@ -14,15 +16,19 @@ from vellum_core.registry import CircuitRegistry
 
 @dataclass(frozen=True)
 class CreditDecision:
+    """Synthetic credit-decision input tuple."""
+
     credit_score: int
     debt_ratio: int
 
 
 def compute_credit_risk(decision: CreditDecision) -> int:
+    """Reference native computation used for audit-side comparison."""
     return decision.credit_score * 1000 - decision.debt_ratio
 
 
 def generate_decisions(count: int, *, seed: int) -> list[CreditDecision]:
+    """Generate deterministic random decisions for repeatable benchmark runs."""
     rng = random.Random(seed)
     return [
         CreditDecision(
@@ -34,6 +40,7 @@ def generate_decisions(count: int, *, seed: int) -> list[CreditDecision]:
 
 
 def format_table(rows: list[tuple[str, str]]) -> str:
+    """Render aligned ASCII table output."""
     col_a = max(len(k) for k, _ in rows)
     col_b = max(len(v) for _, v in rows)
     divider = f"+-{'-' * col_a}-+-{'-' * col_b}-+"
@@ -45,6 +52,7 @@ def format_table(rows: list[tuple[str, str]]) -> str:
 
 
 async def run_benchmark(sample_size: int, seed: int) -> None:
+    """Run benchmark and print comparative timing/speedup metrics."""
     settings = Settings.from_env()
     registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
     provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
@@ -98,6 +106,7 @@ async def run_benchmark(sample_size: int, seed: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse benchmark CLI arguments."""
     parser = argparse.ArgumentParser(
         description="Compare native auditor re-calculation vs ZK proof verification."
     )
@@ -119,4 +128,3 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     asyncio.run(run_benchmark(sample_size=args.sample_size, seed=args.seed))
-

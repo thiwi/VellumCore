@@ -2,11 +2,12 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+ROOT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT_DIR"
 
-CIRCOM_FILE="circuits/batch_credit_check/batch_credit_check.circom"
-MANIFEST_FILE="circuits/batch_credit_check/manifest.json"
-BATCHER_FILE="vellum_core/logic/batcher.py"
+CIRCOM_FILE="$ROOT_DIR/circuits/batch_credit_check/batch_credit_check.circom"
+MANIFEST_FILE="$ROOT_DIR/circuits/batch_credit_check/manifest.json"
+BATCHER_FILE="$ROOT_DIR/vellum_core/logic/batcher.py"
 RESULTS_DIR="$SCRIPT_DIR/study_results"
 VOLUMES=(100 250 500 750 1000)
 OPS=10000
@@ -30,7 +31,7 @@ INFRA_UP=0
 cleanup() {
   if [[ "$INFRA_UP" -eq 1 ]]; then
     echo "[cleanup] Stopping infrastructure..."
-    ./down_infra.sh || true
+    "$ROOT_DIR/down_infra.sh" || true
     INFRA_UP=0
   fi
 
@@ -71,7 +72,7 @@ start_infra_with_retry() {
   local max_attempts=2
 
   while (( attempt <= max_attempts )); do
-    if ./up_infra.sh; then
+    if "$ROOT_DIR/up_infra.sh"; then
       return 0
     fi
 
@@ -153,7 +154,7 @@ PY
 sync_artifacts_to_prover() {
   echo "[sync] Refreshing /shared_assets in prover container"
   docker compose exec -T prover sh -lc 'rm -rf /shared_assets/*'
-  docker compose cp "$SCRIPT_DIR/shared_assets/." prover:/shared_assets
+  docker compose cp "$ROOT_DIR/shared_assets/." prover:/shared_assets
 }
 
 run_for_n() {
@@ -166,7 +167,7 @@ run_for_n() {
   set_batch_size "$n"
 
   echo "[step] Framework setup (compile + trusted setup artifacts)"
-  ./setup_framework.sh
+  "$ROOT_DIR/setup_framework.sh"
 
   echo "[step] Start infrastructure"
   start_infra_with_retry
@@ -185,7 +186,7 @@ run_for_n() {
 
   echo "[step] Run systematic analysis in prover container"
   docker compose exec -T prover \
-    python /app/systematic_vellum_analysis.py \
+    python /app/systematic_study/systematic_vellum_analysis.py \
       --volumes "$n" \
       --ops "$OPS" \
       --reset-audit-log
@@ -196,14 +197,14 @@ run_for_n() {
   validate_result_json "$out_file"
 
   echo "[step] Stop infrastructure to free resources"
-  ./down_infra.sh
+  "$ROOT_DIR/down_infra.sh"
   INFRA_UP=0
 
   echo "[done] N=$n completed"
 }
 
 echo "[init] Ensure clean starting point"
-./down_infra.sh || true
+"$ROOT_DIR/down_infra.sh" || true
 
 for n in "${VOLUMES[@]}"; do
   if [[ -f "$RESULTS_DIR/results_batch_${n}.json" ]]; then

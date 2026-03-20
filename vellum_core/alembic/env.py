@@ -1,3 +1,5 @@
+"""Alembic environment configuration for Vellum Core schema migrations."""
+
 from __future__ import annotations
 
 from logging.config import fileConfig
@@ -16,6 +18,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """Run migrations in offline mode using configured SQLAlchemy URL."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
 
@@ -24,6 +27,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """Run migrations in online mode against a live DB connection."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section) or {},
         prefix="sqlalchemy.",

@@ -1,3 +1,5 @@
+"""Helpers for discovering runnable circuits from manifest directories."""
+
 from __future__ import annotations
 
 import json
@@ -5,6 +7,7 @@ from pathlib import Path
 
 
 def discover_runnable_circuits(circuits_dir: Path) -> list[tuple[Path, str]]:
+    """Return `(circuit_dir, circuit_id)` entries that pass manifest/file checks."""
     results: list[tuple[Path, str]] = []
     if not circuits_dir.exists():
         return results
@@ -28,4 +31,3 @@ def discover_runnable_circuits(circuits_dir: Path) -> list[tuple[Path, str]]:
         results.append((child, circuit_id))
 
     return results
-

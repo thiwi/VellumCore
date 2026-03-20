@@ -15,3 +15,4 @@ shared_store/*
 stress_results/*
 !stress_results/.gitkeep
 config/*.pem
+report.md

@@ -1,3 +1,5 @@
+"""Load/stress test harness for prover service throughput and thermal behavior."""
+
 from __future__ import annotations
 
 import argparse
@@ -23,6 +25,8 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 @dataclass(frozen=True)
 class PhaseConfig:
+    """One stress phase configuration tuple."""
+
     name: str
     circuit_id: str
     jobs: int
@@ -30,6 +34,7 @@ class PhaseConfig:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse stress-tester CLI arguments."""
     parser = argparse.ArgumentParser(description="Stress tester for Sentinel-ZK Prover")
     parser.add_argument(
         "--output",
@@ -52,6 +57,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_jwt_token(jwt_issuer: str, jwt_audience: str, private_key_path: Path) -> str:
+    """Create short-lived JWT used to call authenticated service endpoints."""
     now = int(time.time())
     claims = {
         "iss": jwt_issuer,
@@ -72,6 +78,7 @@ def build_handshake_headers(
     bank_key_id: str,
     bank_private_key_path: Path,
 ) -> dict[str, str]:
+    """Build bank-signature handshake headers for prover submit requests."""
     ts = str(int(time.time()))
     nonce = str(uuid4())
     body_hash = hashlib.sha256(body).hexdigest()
@@ -87,6 +94,7 @@ def build_handshake_headers(
 
 
 def detect_prover_container() -> str:
+    """Resolve active prover container id via compose service label."""
     client = docker.from_env()
     containers = client.containers.list(
         all=True, filters={"label": "com.docker.compose.service=prover"}
@@ -97,6 +105,7 @@ def detect_prover_container() -> str:
 
 
 def extract_cpu_percent(stats: dict[str, Any]) -> float:
+    """Convert Docker stats payload into CPU percentage."""
     cpu_total = stats["cpu_stats"]["cpu_usage"]["total_usage"]
     precpu_total = stats["precpu_stats"]["cpu_usage"]["total_usage"]
     system = stats["cpu_stats"].get("system_cpu_usage", 0)
@@ -112,6 +121,7 @@ def extract_cpu_percent(stats: dict[str, Any]) -> float:
 
 
 def percentile(values: list[float], q: float) -> float:
+    """Return nearest-rank percentile from float sample list."""
     if not values:
         return 0.0
     data = sorted(values)
@@ -122,6 +132,7 @@ def percentile(values: list[float], q: float) -> float:
 async def monitor_resources(
     *, container_id: str, stop: asyncio.Event, interval_seconds: float = 1.0
 ) -> dict[str, float]:
+    """Sample container CPU/RSS metrics until stop event is set."""
     client = docker.from_env()
     cpu_samples: list[float] = []
     rss_peak = 0.0
@@ -154,6 +165,7 @@ async def submit_and_wait(
     circuit_id: str,
     private_input: dict[str, Any],
 ) -> tuple[float, str]:
+    """Submit one proof request and poll until completed/failed."""
     path = "/v1/proofs"
     payload = {"circuit_id": circuit_id, "private_input": private_input}
     body = json.dumps(payload).encode("utf-8")
@@ -187,6 +199,7 @@ async def submit_and_wait(
 
 
 def build_input_for_circuit(circuit_id: str, seed: int) -> dict[str, Any]:
+    """Generate deterministic private input payload for selected test circuit."""
     if circuit_id == "complexity_1k":
         return {"seed": (seed % 9) + 1}
     if circuit_id == "complexity_10k":
@@ -197,6 +210,7 @@ def build_input_for_circuit(circuit_id: str, seed: int) -> dict[str, Any]:
 
 
 def compute_thermal_indicator(latencies: list[float], cpu_peak_percent: float) -> dict[str, Any]:
+    """Estimate thermal throttling from latency drift under high CPU load."""
     if len(latencies) < 6:
         return {
             "degradation_percent": 0.0,
@@ -224,6 +238,7 @@ async def run_phase(
     bank_private_key_path: Path,
     container_id: str,
 ) -> dict[str, Any]:
+    """Execute one stress phase and return aggregated performance report."""
     latencies: list[float] = []
     completed = 0
     failed = 0
@@ -280,6 +295,7 @@ async def run_phase(
 
 
 async def main_async(args: argparse.Namespace) -> None:
+    """Run all configured stress phases and write JSON report."""
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -329,4 +345,3 @@ async def main_async(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     asyncio.run(main_async(parse_args()))
-

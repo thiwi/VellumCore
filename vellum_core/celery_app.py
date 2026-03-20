@@ -1,3 +1,5 @@
+"""Celery application configuration for asynchronous proof job execution."""
+
 from __future__ import annotations
 
 from celery import Celery

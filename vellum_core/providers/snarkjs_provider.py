@@ -1,3 +1,5 @@
+"""snarkjs-based proof provider implementation used by runtime defaults."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,11 +14,14 @@ from vellum_core.registry import CircuitRegistry
 
 
 class SnarkJSProvider(ZKProvider):
+    """snarkjs-backed provider that shells out to Groth16 commands."""
+
     def __init__(self, *, registry: CircuitRegistry, snarkjs_bin: str = "snarkjs") -> None:
         self.registry = registry
         self.snarkjs_bin = snarkjs_bin
 
     async def ensure_artifacts(self, circuit_id: str) -> None:
+        """Ensure all proving artifacts exist before running any command."""
         artifacts = self.registry.get_artifact_paths(circuit_id)
         missing = [
             str(path)
@@ -38,6 +43,7 @@ class SnarkJSProvider(ZKProvider):
     async def generate_proof(
         self, circuit_id: str, private_input: dict[str, Any]
     ) -> ProofResult:
+        """Run `snarkjs groth16 fullprove` and return parsed outputs."""
         await self.ensure_artifacts(circuit_id)
         artifacts = self.registry.get_artifact_paths(circuit_id)
 
@@ -72,6 +78,7 @@ class SnarkJSProvider(ZKProvider):
     async def verify_proof(
         self, circuit_id: str, proof: dict[str, Any], public_signals: list[Any]
     ) -> bool:
+        """Run `snarkjs groth16 verify` and convert known invalid-proof output to False."""
         await self.ensure_artifacts(circuit_id)
         artifacts = self.registry.get_artifact_paths(circuit_id)
 
@@ -104,6 +111,7 @@ class SnarkJSProvider(ZKProvider):
             return "OK!" in stdout
 
     async def _run(self, args: list[str]) -> str:
+        """Execute a command and raise structured APIError on non-zero exit."""
         returncode, stdout, stderr = await self._run_process(args)
         if returncode != 0:
             raise APIError(
@@ -115,6 +123,7 @@ class SnarkJSProvider(ZKProvider):
         return stdout
 
     async def _run_process(self, args: list[str]) -> tuple[int, str, str]:
+        """Spawn subprocess and return `(returncode, stdout, stderr)`."""
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
@@ -126,6 +135,7 @@ class SnarkJSProvider(ZKProvider):
         return process.returncode, stdout, stderr
 
     def _normalize_json_value(self, value: Any) -> Any:
+        """Convert integers to circuit-safe strings and recursively normalize JSON."""
         if isinstance(value, bool):
             return value
         if isinstance(value, int):

@@ -1,3 +1,5 @@
+"""Circuit manifest registry and artifact path resolution."""
+
 from __future__ import annotations
 
 import json
@@ -8,11 +10,15 @@ from vellum_core.schemas import CircuitManifest
 
 
 class CircuitNotFoundError(Exception):
+    """Raised when a circuit id is requested but not present in registry."""
+
     pass
 
 
 @dataclass(frozen=True)
 class ArtifactPaths:
+    """Filesystem artifact locations derived from a circuit id."""
+
     circuit_dir: Path
     wasm_path: Path
     zkey_path: Path
@@ -20,6 +26,8 @@ class ArtifactPaths:
 
 
 class CircuitRegistry:
+    """Discovers circuit manifests and resolves artifact paths."""
+
     def __init__(self, circuits_dir: Path, shared_assets_dir: Path) -> None:
         self.circuits_dir = circuits_dir
         self.shared_assets_dir = shared_assets_dir
@@ -27,6 +35,7 @@ class CircuitRegistry:
         self.refresh()
 
     def refresh(self) -> None:
+        """Rebuild in-memory manifest cache from the circuits directory."""
         self._manifests.clear()
         if not self.circuits_dir.exists():
             return
@@ -47,15 +56,18 @@ class CircuitRegistry:
             self._manifests[manifest.circuit_id] = manifest
 
     def list_circuits(self) -> list[str]:
+        """Return sorted discovered circuit identifiers."""
         return sorted(self._manifests.keys())
 
     def get_manifest(self, circuit_id: str) -> CircuitManifest:
+        """Return validated manifest for a circuit id."""
         manifest = self._manifests.get(circuit_id)
         if manifest is None:
             raise CircuitNotFoundError(circuit_id)
         return manifest
 
     def get_artifact_paths(self, circuit_id: str) -> ArtifactPaths:
+        """Return expected shared-assets paths for a circuit."""
         _ = self.get_manifest(circuit_id)
         artifact_dir = self.shared_assets_dir / circuit_id
         return ArtifactPaths(
@@ -64,4 +76,3 @@ class CircuitRegistry:
             zkey_path=artifact_dir / "final.zkey",
             verification_key_path=artifact_dir / "verification_key.json",
         )
-

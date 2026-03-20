@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vellum-core"
+version = "4.0.0"
+description = "Vellum Core SDK and reference services for batch-first ZK workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Vellum Core Contributors"}]
+dependencies = [
+  "fastapi==0.116.1",
+  "uvicorn[standard]==0.35.0",
+  "PyJWT==2.10.1",
+  "cryptography==45.0.7",
+  "pydantic==2.11.7",
+  "jsonschema==4.25.1",
+  "pytest==8.4.2",
+  "httpx==0.28.1",
+  "docker==7.1.0",
+  "celery==5.4.0",
+  "redis==5.2.1",
+  "SQLAlchemy==2.0.37",
+  "asyncpg==0.30.0",
+  "alembic==1.14.0",
+  "prometheus-client==0.21.1",
+]
+
+[project.scripts]
+vellum = "vellum_core.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vellum_core*"]
