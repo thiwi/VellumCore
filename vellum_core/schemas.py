@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from vellum_core.logic.batcher import MAX_BATCH_SIZE
 
 
 class CircuitManifest(BaseModel):
@@ -18,8 +19,12 @@ class CircuitManifest(BaseModel):
 class BatchProveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    balances: list[int] | None = Field(default=None, min_length=1, max_length=100)
-    limits: list[int] | None = Field(default=None, min_length=1, max_length=100)
+    balances: list[int] | None = Field(
+        default=None, min_length=1, max_length=MAX_BATCH_SIZE
+    )
+    limits: list[int] | None = Field(
+        default=None, min_length=1, max_length=MAX_BATCH_SIZE
+    )
     source_ref: str | None = Field(default=None, min_length=1, max_length=256)
     request_id: str | None = None
 

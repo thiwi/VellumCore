@@ -5,17 +5,17 @@
     "properties": {
       "balances": {
         "type": "array",
-        "minItems": 100,
-        "maxItems": 100,
+        "minItems": 250,
+        "maxItems": 250,
         "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
       },
       "limits": {
         "type": "array",
-        "minItems": 100,
-        "maxItems": 100,
+        "minItems": 250,
+        "maxItems": 250,
         "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
       },
-      "active_count": { "type": "integer", "minimum": 1, "maximum": 100 }
+      "active_count": { "type": "integer", "minimum": 1, "maximum": 250 }
     },
     "required": ["balances", "limits", "active_count"],
     "additionalProperties": false

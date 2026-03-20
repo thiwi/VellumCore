@@ -3,10 +3,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from vellum_core.logic.batcher import MAX_BATCH_SIZE
 from vellum_core.schemas import BatchProveRequest
 
 
-def test_batch_schema_accepts_up_to_hundred_items() -> None:
+def test_batch_schema_accepts_up_to_max_batch_size_items() -> None:
     payload = BatchProveRequest.model_validate(
         {
             "balances": [101, 202, 303],
@@ -22,12 +23,12 @@ def test_batch_schema_rejects_empty_batch() -> None:
         BatchProveRequest.model_validate({"balances": [], "limits": []})
 
 
-def test_batch_schema_rejects_more_than_hundred_items() -> None:
+def test_batch_schema_rejects_more_than_max_batch_size_items() -> None:
     with pytest.raises(ValidationError):
         BatchProveRequest.model_validate(
             {
-                "balances": [1 for _ in range(101)],
-                "limits": [0 for _ in range(101)],
+                "balances": [1 for _ in range(MAX_BATCH_SIZE + 1)],
+                "limits": [0 for _ in range(MAX_BATCH_SIZE + 1)],
             }
         )
 

@@ -17,7 +17,7 @@ template BatchCreditCheck(N) {
     component active_count_gt_zero = GreaterThan(8);
     component active_count_lt_eq_n = LessThan(8);
 
-    // 0 < active_count <= N (N is compiled as 100)
+    // 0 < active_count <= N (N is compiled as 250)
     active_count_gt_zero.in[0] <== active_count;
     active_count_gt_zero.in[1] <== 0;
     active_count_gt_zero.out === 1;

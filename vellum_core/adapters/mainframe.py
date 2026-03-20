@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 from dataclasses import dataclass
 
+from vellum_core.logic.batcher import MAX_BATCH_SIZE
+
 
 @dataclass(frozen=True)
 class MainframeBatchSignals:
@@ -14,7 +16,9 @@ class MainframeBatchSignals:
 class MainframeAdapter:
     """Simulated secure connector for legacy/mainframe records."""
 
-    async def fetch_credit_batch(self, source_ref: str, batch_size: int = 100) -> MainframeBatchSignals:
+    async def fetch_credit_batch(
+        self, source_ref: str, batch_size: int = MAX_BATCH_SIZE
+    ) -> MainframeBatchSignals:
         if not source_ref or not source_ref.strip():
             raise ValueError("source_ref must be a non-empty string")
 

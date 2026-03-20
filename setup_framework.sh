@@ -8,7 +8,24 @@ BUILD_ROOT="${BUILD_ROOT:-$ROOT_DIR/.build}"
 PTAU_POWER="${PTAU_POWER:-14}"
 CONTRIBUTION_ENTROPY="${CONTRIBUTION_ENTROPY:-vellum-local-dev}"
 SNARKJS_BIN="${SNARKJS_BIN:-snarkjs}"
-CIRCOM_LIB_PATH="${CIRCOM_LIB_PATH:-/usr/local/lib/node_modules}"
+CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
+
+# Ensure binaries installed by cargo are discoverable in this shell.
+PATH="$CARGO_BIN_DIR:$PATH"
+
+default_node_modules_path() {
+  if command -v npm >/dev/null 2>&1; then
+    local npm_root
+    npm_root="$(npm root -g 2>/dev/null || true)"
+    if [[ -n "$npm_root" ]]; then
+      echo "$npm_root"
+      return
+    fi
+  fi
+  echo "/usr/local/lib/node_modules"
+}
+
+CIRCOM_LIB_PATH="${CIRCOM_LIB_PATH:-$(default_node_modules_path)}"
 
 detect_arch() {
   local machine
@@ -36,7 +53,11 @@ ensure_tooling() {
   if command -v cargo >/dev/null 2>&1; then
     echo "circom not found, installing via cargo (native build for $(detect_arch))"
     cargo install --locked --git https://github.com/iden3/circom.git --tag v2.1.8 circom
-    return
+    if command -v circom >/dev/null 2>&1; then
+      return
+    fi
+    echo "circom installation completed but binary is still not on PATH" >&2
+    exit 1
   fi
 
   echo "missing dependency: circom (and cargo not available to auto-install)" >&2

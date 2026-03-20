@@ -13,7 +13,7 @@ from vellum_core.celery_app import celery_app
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.errors import APIError, register_exception_handlers
-from vellum_core.logic.batcher import batch_prepare_input
+from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
 from vellum_core.metrics import prometheus_payload
 from vellum_core.proof_store import VellumAuditStore
 from vellum_core.schemas import (
@@ -122,7 +122,7 @@ async def create_batch_proof(
         "mode": "batch",
         "request_id": payload.request_id,
         "source_mode": "source_ref" if source_ref is not None else "direct",
-        "batch_size": len(payload.balances) if payload.balances is not None else 100,
+        "batch_size": len(payload.balances) if payload.balances is not None else MAX_BATCH_SIZE,
     }
 
     await db.create_proof_job(

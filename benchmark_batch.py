@@ -80,8 +80,8 @@ async def run_benchmark(*, seed: int) -> None:
     speedup = native_total_ms / single_verify_ms if single_verify_ms > 0 else float("inf")
 
     rows = [
-        ("Scenario", "100 credit decisions (single batch proof)"),
-        ("Native total (100 checks)", f"{native_total_ms:.6f} ms"),
+        ("Scenario", f"{MAX_BATCH_SIZE} credit decisions (single batch proof)"),
+        (f"Native total ({MAX_BATCH_SIZE} checks)", f"{native_total_ms:.6f} ms"),
         ("ZK single verify", f"{single_verify_ms:.6f} ms"),
         ("Operational overhead (prove)", f"{operational_overhead_ms:.6f} ms"),
         ("Native checks valid", str(native_valid)),
@@ -93,7 +93,7 @@ async def run_benchmark(*, seed: int) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark native 100 checks vs single batch proof verification."
+        description=f"Benchmark native {MAX_BATCH_SIZE} checks vs single batch proof verification."
     )
     parser.add_argument(
         "--seed",

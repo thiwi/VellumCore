@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-MAX_BATCH_SIZE = 100
+MAX_BATCH_SIZE = 250
 MAX_UINT32 = 4_294_967_295
 
 
@@ -63,9 +63,11 @@ def batch_prepare_from_private_input(private_input: dict[str, Any]) -> PreparedB
         raise ValueError("private_input must contain integer active_count")
 
     if len(balances_raw) != MAX_BATCH_SIZE or len(limits_raw) != MAX_BATCH_SIZE:
-        raise ValueError("private_input balances/limits must already be padded to 100")
+        raise ValueError(
+            f"private_input balances/limits must already be padded to {MAX_BATCH_SIZE}"
+        )
     if active_count_raw < 1 or active_count_raw > MAX_BATCH_SIZE:
-        raise ValueError("active_count must be between 1 and 100")
+        raise ValueError(f"active_count must be between 1 and {MAX_BATCH_SIZE}")
 
     _validate_u32_list("balances", balances_raw)
     _validate_u32_list("limits", limits_raw)

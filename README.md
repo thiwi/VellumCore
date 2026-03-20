@@ -2,7 +2,7 @@
 
 Production-oriented ZK proving/verification framework with:
 - package namespace `vellum_core` (hard rename from `sentinel_zk`)
-- batch-first proving (`batch_credit_check`, N=100)
+- batch-first proving (`batch_credit_check`, N=250)
 - distributed proving (FastAPI orchestrator + Redis/Celery worker)
 - Vault Transit signing for JWT, bank-handshake, and audit-chain links
 - PostgreSQL system-of-record for proof jobs and append-only audit chain
@@ -47,8 +47,8 @@ Infrastructure in `docker-compose.yml`:
 `POST /v1/proofs/batch` accepts exactly one mode:
 
 1. Direct mode
-- `balances`: `list[int]` (1..100)
-- `limits`: `list[int]` (1..100, same length)
+- `balances`: `list[int]` (1..250)
+- `limits`: `list[int]` (1..250, same length)
 - optional `request_id`
 
 2. Adapter mode
@@ -58,7 +58,7 @@ Infrastructure in `docker-compose.yml`:
 Rules:
 - Providing both direct arrays and `source_ref` is rejected.
 - Server enforces anti-ghost invariants:
-  - deterministic zero padding to 100
+  - deterministic zero padding to 250
   - explicit `active_count`
   - strict uint bounds
 
@@ -125,7 +125,7 @@ Runtime signing is done through Vault Transit keys:
 docker compose exec prover python /app/benchmark_comparison.py --sample-size 1000
 ```
 
-- Batch benchmark (100 decisions in one proof):
+- Batch benchmark (250 decisions in one proof):
 
 ```bash
 docker compose exec prover python /app/benchmark_batch.py --seed 42
