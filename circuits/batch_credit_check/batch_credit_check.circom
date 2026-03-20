@@ -14,8 +14,8 @@ template BatchCreditCheck(N) {
     signal decision_valid[N];
     signal all_valid_chain[N + 1];
 
-    component active_count_gt_zero = GreaterThan(8);
-    component active_count_lt_eq_n = LessThan(8);
+    component active_count_gt_zero = GreaterThan(16);
+    component active_count_lt_eq_n = LessThan(16);
 
     // 0 < active_count <= N (N is compiled as 250)
     active_count_gt_zero.in[0] <== active_count;
@@ -33,7 +33,7 @@ template BatchCreditCheck(N) {
 
     for (var i = 0; i < N; i++) {
         // is_active[i] = 1 iff i < active_count
-        activity_cmp[i] = GreaterThan(8);
+        activity_cmp[i] = GreaterThan(16);
         activity_cmp[i].in[0] <== active_count;
         activity_cmp[i].in[1] <== i;
         is_active[i] <== activity_cmp[i].out;
@@ -54,4 +54,4 @@ template BatchCreditCheck(N) {
     active_count_out <== active_count;
 }
 
-component main {public [limits, active_count]} = BatchCreditCheck(100);
+component main {public [limits, active_count]} = BatchCreditCheck(250);

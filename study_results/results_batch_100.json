@@ -1,0 +1,64 @@
+{
+  "run_id": "b99ca9f3-a6c1-41c3-9299-d395640ec98f",
+  "generated_at": "2026-03-20T13:18:42.874342+00:00",
+  "started_at": "2026-03-20T13:18:40.931584+00:00",
+  "environment": {
+    "vault_addr": "http://vault:8200",
+    "database_url": "postgresql+asyncpg://vellum:vellum@postgres:5432/vellum",
+    "celery_queue": "vellum-queue",
+    "batch_size": 100,
+    "volumes": [
+      100
+    ],
+    "ops_values": [
+      10000
+    ],
+    "vault_key_versions": {
+      "vellum-jwt": [
+        "1"
+      ],
+      "vellum-audit": [
+        "1"
+      ],
+      "vellum-bank": [
+        "1"
+      ]
+    }
+  },
+  "matrix": [
+    {
+      "n": 100,
+      "ops": 10000,
+      "native_time_ms": 166.24016600000147,
+      "proving_time_ms": 1059.9288330000009,
+      "verification_time_ms": 215.01300000000018,
+      "vault_latency_ms": 10.227716400001441,
+      "db_overhead_ms": 36.47395800000197,
+      "auditor_speedup": 0.7731633250082615,
+      "realtime_speedup": 0.12780754240134423,
+      "batch_count": 1,
+      "single_verify_ms": 215.01300000000018,
+      "status": "native_faster",
+      "integrity_valid": true,
+      "integrity_checked_entries": 3,
+      "error": null
+    }
+  ],
+  "pivot_summary": [
+    {
+      "ops": 10000,
+      "pivot_n": null,
+      "auditor_speedup": null,
+      "realtime_speedup": null,
+      "native_time_ms": null,
+      "verification_time_ms": null,
+      "status": "not_reached"
+    }
+  ],
+  "final_integrity": {
+    "valid": true,
+    "checked_entries": 4,
+    "first_broken_index": null,
+    "reason": null
+  }
+}
