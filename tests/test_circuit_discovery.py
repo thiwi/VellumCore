@@ -13,7 +13,8 @@ def test_discovery_ignores_library_and_finds_manifest_circuits() -> None:
 
     assert "credit_check" in ids
     assert "batch_credit_check" in ids
-    assert "complexity_1k" in ids
+    assert "dti_check" in ids
+    assert "reserve_ratio_check" in ids
     assert "library" not in ids
 
 

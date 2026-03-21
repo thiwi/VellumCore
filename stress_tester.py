@@ -166,7 +166,7 @@ async def submit_and_wait(
     private_input: dict[str, Any],
 ) -> tuple[float, str]:
     """Submit one proof request and poll until completed/failed."""
-    path = "/v1/proofs"
+    path = "/v1/proofs/batch"
     payload = {"circuit_id": circuit_id, "private_input": private_input}
     body = json.dumps(payload).encode("utf-8")
     headers = {
@@ -200,13 +200,33 @@ async def submit_and_wait(
 
 def build_input_for_circuit(circuit_id: str, seed: int) -> dict[str, Any]:
     """Generate deterministic private input payload for selected test circuit."""
-    if circuit_id == "complexity_1k":
-        return {"seed": (seed % 9) + 1}
-    if circuit_id == "complexity_10k":
-        return {"seed": (seed % 9) + 1}
-    if circuit_id == "complexity_100k":
-        return {"seed": (seed % 9) + 1}
-    return {"credit_score": 700, "debt_ratio": 200}
+    if circuit_id == "credit_check":
+        return {
+            "credit_score": 700 + (seed % 120),
+            "debt_ratio": 180_000 + ((seed * 137) % 300_000),
+        }
+    if circuit_id == "dti_check":
+        monthly_income = 8_000 + ((seed * 97) % 12_000)
+        max_dti_bps = 4_000
+        # Keep sample mostly valid while varying payload.
+        max_payment = (monthly_income * max_dti_bps) // 10_000
+        monthly_debt_payment = max(0, max_payment - 200 - (seed % 100))
+        return {
+            "monthly_income": monthly_income,
+            "monthly_debt_payment": monthly_debt_payment,
+            "max_dti_bps": max_dti_bps,
+        }
+    if circuit_id == "reserve_ratio_check":
+        short_term_liabilities = 200_000 + ((seed * 389) % 500_000)
+        min_reserve_ratio_bps = 11_000
+        required_assets = (short_term_liabilities * min_reserve_ratio_bps) // 10_000
+        liquid_assets = required_assets + 5_000 + ((seed * 53) % 20_000)
+        return {
+            "liquid_assets": liquid_assets,
+            "short_term_liabilities": short_term_liabilities,
+            "min_reserve_ratio_bps": min_reserve_ratio_bps,
+        }
+    raise ValueError(f"Unsupported circuit_id for stress input generation: {circuit_id}")
 
 
 def compute_thermal_indicator(latencies: list[float], cpu_peak_percent: float) -> dict[str, Any]:
@@ -307,9 +327,9 @@ async def main_async(args: argparse.Namespace) -> None:
     prover_container_id = detect_prover_container()
 
     phases = [
-        PhaseConfig(name="constraints_1k", circuit_id="complexity_1k", jobs=18, concurrency=6),
-        PhaseConfig(name="constraints_10k", circuit_id="complexity_10k", jobs=12, concurrency=4),
-        PhaseConfig(name="constraints_100k", circuit_id="complexity_100k", jobs=6, concurrency=2),
+        PhaseConfig(name="credit_policy", circuit_id="credit_check", jobs=18, concurrency=6),
+        PhaseConfig(name="dti_policy", circuit_id="dti_check", jobs=12, concurrency=4),
+        PhaseConfig(name="reserve_policy", circuit_id="reserve_ratio_check", jobs=8, concurrency=3),
     ]
 
     phase_reports: list[dict[str, Any]] = []

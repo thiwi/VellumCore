@@ -1,0 +1,15 @@
+{
+  "circuit_id": "dti_check",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "monthly_income": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+      "monthly_debt_payment": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+      "max_dti_bps": { "type": "integer", "minimum": 1, "maximum": 10000 }
+    },
+    "required": ["monthly_income", "monthly_debt_payment", "max_dti_bps"],
+    "additionalProperties": false
+  },
+  "public_signals": ["dti_ok", "max_dti_bps"],
+  "version": "1.0.0"
+}

@@ -1,0 +1,15 @@
+{
+  "circuit_id": "reserve_ratio_check",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "liquid_assets": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+      "short_term_liabilities": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+      "min_reserve_ratio_bps": { "type": "integer", "minimum": 1, "maximum": 20000 }
+    },
+    "required": ["liquid_assets", "short_term_liabilities", "min_reserve_ratio_bps"],
+    "additionalProperties": false
+  },
+  "public_signals": ["reserve_ok", "min_reserve_ratio_bps"],
+  "version": "1.0.0"
+}
