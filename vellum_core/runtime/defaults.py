@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from vellum_core.adapters.mainframe import MainframeAdapter
 from vellum_core.api import CircuitManager, FrameworkClient, FrameworkConfig, ProofEngine
 from vellum_core.config import Settings
 from vellum_core.providers import SnarkJSProvider
 from vellum_core.registry import CircuitRegistry
-from vellum_core.spi import ArtifactPathsView, ArtifactStore, InputAdapter, JobBackend, Signer
+from vellum_core.spi import ArtifactPathsView, ArtifactStore, JobBackend, Signer
 from vellum_core.vault import VaultTransitClient
 
 
@@ -33,19 +32,6 @@ class FilesystemArtifactStore(ArtifactStore):
         return all(
             p.exists() for p in (paths.wasm_path, paths.zkey_path, paths.verification_key_path)
         )
-
-
-class MainframeInputAdapter(InputAdapter):
-    """Default adapter mapping source_ref to synthetic/legacy credit batch data."""
-
-    def __init__(self, adapter: MainframeAdapter | None = None) -> None:
-        self.adapter = adapter or MainframeAdapter()
-
-    async def fetch_credit_batch(
-        self, source_ref: str, batch_size: int
-    ) -> tuple[list[int], list[int]]:
-        mapped = await self.adapter.fetch_credit_batch(source_ref=source_ref, batch_size=batch_size)
-        return mapped.balances, mapped.limits
 
 
 class VaultSigner(Signer):
@@ -80,7 +66,11 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
     provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
     circuit_manager = CircuitManager(registry=registry, artifact_store=artifact_store)
     proof_engine = ProofEngine(provider=provider, circuit_manager=circuit_manager)
-    vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
+    vault_client = VaultTransitClient(
+        addr=settings.vault_addr,
+        token=settings.vault_token,
+        tls_ca_bundle=settings.tls_ca_bundle,
+    )
 
     return FrameworkClient(
         config=FrameworkConfig.from_settings(settings),
@@ -88,7 +78,6 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
         proof_engine=proof_engine,
         provider=provider,
         artifact_store=artifact_store,
-        input_adapter=MainframeInputAdapter(),
         signer=VaultSigner(vault_client),
         job_backend=CeleryJobBackend(),
     )

@@ -7,7 +7,8 @@ import hashlib
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
+from uuid import uuid4
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -15,7 +16,6 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from fastapi import Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
-from redis.asyncio import Redis
 
 from vellum_core.errors import APIError
 from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
@@ -24,12 +24,42 @@ from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 BEARER_SCHEME = HTTPBearer(auto_error=False)
 
 
+class _MissingRedisClient:
+    """Placeholder client used when redis dependency is not installed."""
+
+    async def set(self, *args: Any, **kwargs: Any) -> Any:
+        _ = (args, kwargs)
+        raise RuntimeError("redis package not installed")
+
+    async def incr(self, *args: Any, **kwargs: Any) -> Any:
+        _ = (args, kwargs)
+        raise RuntimeError("redis package not installed")
+
+    async def expire(self, *args: Any, **kwargs: Any) -> Any:
+        _ = (args, kwargs)
+        raise RuntimeError("redis package not installed")
+
+
+def _create_redis_client(redis_url: str) -> Any:
+    try:
+        from redis.asyncio import Redis
+    except ModuleNotFoundError:
+        return _MissingRedisClient()
+    return Redis.from_url(redis_url, decode_responses=True)
+
+
 class RedisNonceReplayGuard:
     """Reject replayed or stale bank handshakes using Redis NX+TTL keys."""
 
-    def __init__(self, *, redis_url: str, window_seconds: int) -> None:
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        window_seconds: int,
+        redis_client: Any | None = None,
+    ) -> None:
         self.window_seconds = window_seconds
-        self.redis = Redis.from_url(redis_url, decode_responses=True)
+        self.redis = redis_client if redis_client is not None else _create_redis_client(redis_url)
 
     async def check_and_store(self, *, key_id: str, nonce: str, timestamp: float) -> None:
         now = time.time()
@@ -52,6 +82,37 @@ class RedisNonceReplayGuard:
             )
 
 
+class RedisSubmitRateLimiter:
+    """Rate-limit submit requests per bank key (and source IP when present)."""
+
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        max_per_minute: int,
+        redis_client: Any | None = None,
+    ) -> None:
+        self.max_per_minute = max_per_minute
+        self.redis = redis_client if redis_client is not None else _create_redis_client(redis_url)
+
+    async def check_and_store(self, *, key_id: str, source_ip: str | None) -> None:
+        if self.max_per_minute < 1:
+            return
+        window = int(time.time() // 60)
+        client_marker = source_ip or "unknown"
+        redis_key = f"vellum:ratelimit:submit:{key_id}:{client_marker}:{window}"
+        count = await self.redis.incr(redis_key)
+        if count == 1:
+            await self.redis.expire(redis_key, 61)
+        if count > self.max_per_minute:
+            raise APIError(
+                status_code=429,
+                code="rate_limited",
+                message="Submit rate limit exceeded",
+                details={"limit_per_minute": self.max_per_minute},
+            )
+
+
 class VaultJWTSigner:
     """Create EdDSA JWTs using Vault Transit signing keys."""
 
@@ -68,15 +129,26 @@ class VaultJWTSigner:
         self.issuer = issuer
         self.audience = audience
 
-    async def sign(self, *, subject: str, ttl_seconds: int = 3600) -> str:
+    async def sign(
+        self,
+        *,
+        subject: str,
+        ttl_seconds: int = 3600,
+        scopes: set[str] | list[str] | tuple[str, ...] | None = None,
+    ) -> str:
         now = int(time.time())
+        normalized_scopes = sorted({scope.strip() for scope in (scopes or set()) if scope.strip()})
         payload = {
             "iss": self.issuer,
             "aud": self.audience,
             "sub": subject,
             "iat": now,
+            "nbf": now,
             "exp": now + ttl_seconds,
+            "jti": str(uuid4()),
         }
+        if normalized_scopes:
+            payload["scope"] = " ".join(normalized_scopes)
         header = {"alg": "EdDSA", "typ": "JWT"}
 
         header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
@@ -102,23 +174,44 @@ class AuthManager:
         bank_key_mapping: dict[str, str],
         redis_url: str,
         nonce_window_seconds: int,
+        jwt_max_ttl_seconds: int,
+        jwt_leeway_seconds: int,
+        submit_rate_limit_per_minute: int,
+        security_event_recorder: Callable[..., Awaitable[None]] | None = None,
+        replay_guard: RedisNonceReplayGuard | None = None,
+        submit_rate_limiter: RedisSubmitRateLimiter | None = None,
     ) -> None:
         self.vault_client = vault_client
         self.key_cache = key_cache
         self.jwt_key_name = jwt_key_name
         self.jwt_issuer = jwt_issuer
         self.jwt_audience = jwt_audience
+        self.jwt_max_ttl_seconds = jwt_max_ttl_seconds
+        self.jwt_leeway_seconds = jwt_leeway_seconds
         self.bank_key_mapping = bank_key_mapping
-        self.replay_guard = RedisNonceReplayGuard(
+        self.security_event_recorder = security_event_recorder
+        self.replay_guard = replay_guard or RedisNonceReplayGuard(
             redis_url=redis_url,
             window_seconds=nonce_window_seconds,
         )
+        self.submit_rate_limiter = submit_rate_limiter or RedisSubmitRateLimiter(
+            redis_url=redis_url,
+            max_per_minute=submit_rate_limit_per_minute,
+        )
 
     async def verify_jwt_credentials(
-        self, credentials: HTTPAuthorizationCredentials | None
+        self,
+        credentials: HTTPAuthorizationCredentials | None,
+        *,
+        required_scopes: set[str] | None = None,
     ) -> dict[str, Any]:
         """Validate bearer token and return claims payload."""
         if credentials is None:
+            await self._emit_security_event(
+                event_type="jwt_missing",
+                outcome="denied",
+                details={"reason": "missing bearer token"},
+            )
             raise APIError(
                 status_code=401,
                 code="missing_token",
@@ -134,19 +227,61 @@ class AuthManager:
                 algorithms=["EdDSA"],
                 issuer=self.jwt_issuer,
                 audience=self.jwt_audience,
-                options={"require": ["iss", "aud", "sub", "iat", "exp"]},
+                options={"require": ["iss", "aud", "sub", "iat", "exp", "nbf", "jti"]},
+                leeway=self.jwt_leeway_seconds,
             )
         except InvalidTokenError as exc:
+            await self._emit_security_event(
+                event_type="jwt_invalid",
+                outcome="denied",
+                details={"reason": str(exc)},
+            )
             raise APIError(
                 status_code=401,
                 code="invalid_token",
                 message="JWT validation failed",
                 details={"reason": str(exc)},
             ) from exc
+
+        token_lifetime = int(claims["exp"]) - int(claims["iat"])
+        if token_lifetime > self.jwt_max_ttl_seconds:
+            await self._emit_security_event(
+                event_type="jwt_ttl_exceeded",
+                outcome="denied",
+                actor=str(claims.get("sub")),
+                details={"max_ttl_seconds": self.jwt_max_ttl_seconds},
+            )
+            raise APIError(
+                status_code=401,
+                code="invalid_token_ttl",
+                message="JWT lifetime exceeds configured maximum",
+                details={"max_ttl_seconds": self.jwt_max_ttl_seconds},
+            )
+
+        if required_scopes:
+            claim_scopes = _extract_scope_set(claims)
+            if not required_scopes.issubset(claim_scopes):
+                await self._emit_security_event(
+                    event_type="jwt_scope_denied",
+                    outcome="denied",
+                    actor=str(claims.get("sub")),
+                    details={
+                        "required_scopes": sorted(required_scopes),
+                        "granted_scopes": sorted(claim_scopes),
+                    },
+                )
+                raise APIError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message="JWT does not contain required scopes",
+                    details={"required_scopes": sorted(required_scopes)},
+                )
+
         return claims
 
-    async def verify_handshake(self, request: Request, raw_body: bytes) -> None:
+    async def verify_handshake(self, request: Request, raw_body: bytes) -> str:
         """Validate bank headers, signature, and replay protection for request body."""
+        source_ip = _client_ip(request)
         key_id = request.headers.get("X-Bank-Key-Id")
         timestamp_raw = request.headers.get("X-Bank-Timestamp")
         nonce = request.headers.get("X-Bank-Nonce")
@@ -163,6 +298,12 @@ class AuthManager:
             if not value
         ]
         if missing:
+            await self._emit_security_event(
+                event_type="handshake_headers_missing",
+                outcome="denied",
+                source_ip=source_ip,
+                details={"missing_headers": missing},
+            )
             raise APIError(
                 status_code=401,
                 code="missing_handshake_headers",
@@ -176,7 +317,7 @@ class AuthManager:
         assert signature_value is not None
 
         timestamp_epoch = self._parse_timestamp(timestamp_raw)
-        canonical = self._canonical_request_string(
+        canonical = build_canonical_request_string(
             method=request.method,
             path=request.url.path,
             timestamp=timestamp_raw,
@@ -186,6 +327,12 @@ class AuthManager:
 
         bank_vault_key = self.bank_key_mapping.get(key_id)
         if bank_vault_key is None:
+            await self._emit_security_event(
+                event_type="handshake_unknown_key",
+                outcome="denied",
+                source_ip=source_ip,
+                details={"key_id": key_id},
+            )
             raise APIError(
                 status_code=401,
                 code="unknown_bank_key",
@@ -199,30 +346,46 @@ class AuthManager:
             key_version=signature_key_version,
         )
         if not _verify_ed25519_signature(public_key_pem, canonical.encode("utf-8"), signature_raw):
+            await self._emit_security_event(
+                event_type="handshake_signature_invalid",
+                outcome="denied",
+                source_ip=source_ip,
+                details={"key_id": key_id},
+            )
             raise APIError(
                 status_code=401,
                 code="invalid_handshake_signature",
                 message="Bank request signature invalid",
             )
 
-        await self.replay_guard.check_and_store(
-            key_id=key_id,
-            nonce=nonce,
-            timestamp=timestamp_epoch,
-        )
-
-    @staticmethod
-    def _canonical_request_string(
-        *,
-        method: str,
-        path: str,
-        timestamp: str,
-        nonce: str,
-        raw_body: bytes,
-    ) -> str:
-        """Build deterministic signed string used by both producer and verifier."""
-        body_hash = hashlib.sha256(raw_body).hexdigest()
-        return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
+        try:
+            await self.replay_guard.check_and_store(
+                key_id=key_id,
+                nonce=nonce,
+                timestamp=timestamp_epoch,
+            )
+        except APIError as exc:
+            await self._emit_security_event(
+                event_type=f"handshake_{exc.code}",
+                outcome="denied",
+                source_ip=source_ip,
+                details={"key_id": key_id},
+            )
+            raise
+        try:
+            await self.submit_rate_limiter.check_and_store(
+                key_id=key_id,
+                source_ip=source_ip,
+            )
+        except APIError:
+            await self._emit_security_event(
+                event_type="submit_rate_limited",
+                outcome="denied",
+                source_ip=source_ip,
+                details={"key_id": key_id},
+            )
+            raise
+        return key_id
 
     @staticmethod
     def _parse_timestamp(timestamp_raw: str) -> float:
@@ -241,6 +404,29 @@ class AuthManager:
                 details={"value": timestamp_raw},
             ) from exc
 
+    async def _emit_security_event(
+        self,
+        *,
+        event_type: str,
+        outcome: str,
+        actor: str | None = None,
+        source_ip: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        recorder = self.security_event_recorder
+        if recorder is None:
+            return
+        try:
+            await recorder(
+                event_type=event_type,
+                outcome=outcome,
+                actor=actor,
+                source_ip=source_ip,
+                details=details or {},
+            )
+        except Exception:
+            return
+
 
 def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: bytes) -> bool:
     """Return True when signature verifies for payload under provided key."""
@@ -250,6 +436,19 @@ def _verify_ed25519_signature(public_key_pem: str, payload: bytes, signature: by
         return True
     except Exception:
         return False
+
+
+def build_canonical_request_string(
+    *,
+    method: str,
+    path: str,
+    timestamp: str,
+    nonce: str,
+    raw_body: bytes,
+) -> str:
+    """Build canonical request string used for bank request signatures."""
+    body_hash = hashlib.sha256(raw_body).hexdigest()
+    return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
 
 
 def _load_ed25519_public_key(public_key_value: str) -> Ed25519PublicKey:
@@ -269,3 +468,23 @@ def _load_ed25519_public_key(public_key_value: str) -> Ed25519PublicKey:
 def _b64url_encode(raw: bytes) -> str:
     """Encode bytes to unpadded base64url string."""
     return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _extract_scope_set(claims: dict[str, Any]) -> set[str]:
+    scopes: set[str] = set()
+    scope_value = claims.get("scope")
+    if isinstance(scope_value, str):
+        scopes.update({part.strip() for part in scope_value.split(" ") if part.strip()})
+    scopes_value = claims.get("scopes")
+    if isinstance(scopes_value, list):
+        scopes.update({str(part).strip() for part in scopes_value if str(part).strip()})
+    return scopes
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client is not None:
+        return request.client.host
+    return None

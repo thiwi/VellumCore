@@ -22,7 +22,9 @@ Reference deployment (operational example built on SDK):
 - PostgreSQL as system-of-record (`proof_jobs`, `audit_log`).
 - Redis for queue broker and nonce replay protection.
 - Vault Transit for JWT, bank signatures, and audit chain signing.
+- Encrypted job payload persistence (`sealed_job_payload`) with purge-on-terminal-state.
 - SnarkJS-based proof generation and verification with manifest-discovered circuits.
+- OpenTelemetry Collector + Tempo + Grafana for distributed tracing and correlation.
 
 ## SDK Quick Start
 
@@ -55,6 +57,8 @@ Start full stack:
 ./up_infra.sh
 ```
 
+Note: compose defaults to `SECURITY_PROFILE=dev` for local execution. Runtime defaults are strict.
+
 Compile/setup circuit artifacts:
 
 ```bash
@@ -68,6 +72,11 @@ curl -fsS http://localhost:8000/healthz
 curl -fsS http://localhost:8001/healthz
 curl -fsS http://localhost:8002/healthz
 ```
+
+Observability UIs:
+
+- Grafana: `http://localhost:3000` (anonymous admin enabled in local compose)
+- Tempo API: `http://localhost:3200`
 
 Stop stack:
 

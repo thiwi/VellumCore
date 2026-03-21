@@ -96,15 +96,23 @@ def test_happy_path_compose(compose_stack: None) -> None:
 def test_invalid_payload_rejected(compose_stack: None) -> None:
     response = httpx.post(
         "http://localhost:8000/api/demo/prove",
-        json={"balances": [10], "limits": [1], "source_ref": "legacy://mixed"},
+        json={"balances": [10], "limits": [1], "private_input": {"x": 1}},
         timeout=20.0,
     )
     assert response.status_code == 422
 
 
 @pytest.mark.nightly
-def test_source_ref_adapter_flow(compose_stack: None) -> None:
-    proof_id = _submit_proof({"source_ref": "legacy://batch/42"})
+def test_private_input_mode_flow(compose_stack: None) -> None:
+    proof_id = _submit_proof(
+        {
+            "private_input": {
+                "balances": [120, 220, 330] + [0] * 247,
+                "limits": [100, 200, 300] + [0] * 247,
+                "active_count": 3,
+            }
+        }
+    )
     job = _wait_proof_status(proof_id)
     assert job["status"] == "completed"
 

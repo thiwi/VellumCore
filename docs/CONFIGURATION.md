@@ -38,15 +38,33 @@ Loaded by `Settings.from_env()` in `vellum_core/config.py`.
 
 ### Auth and Security
 
+- `SECURITY_PROFILE` (`strict` or `dev`; default: `strict`)
 - `JWT_ISSUER`
 - `JWT_AUDIENCE`
 - `NONCE_WINDOW_SECONDS`
+- `JWT_MAX_TTL_SECONDS`
+- `JWT_LEEWAY_SECONDS`
+- `SUBMIT_RATE_LIMIT_PER_MINUTE`
+- `METRICS_REQUIRE_AUTH`
+- `VELLUM_DATA_KEY` (Vault Transit key for encrypted job payload persistence)
+- `TLS_CA_BUNDLE` (optional custom CA bundle path for outbound TLS verification)
 
 ### Performance / Metrics
 
 - `PROVER_MAX_PARALLEL_PROOFS`
+- `WORKER_METRICS_HOST`
 - `WORKER_METRICS_PORT`
 - `NATIVE_VERIFY_BASELINE_SECONDS`
+
+### Observability / Logging
+
+- `LOG_LEVEL` (default `INFO`)
+- `OTEL_ENABLED` (`true` or `false`, default `true`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (default: `http://otel-collector:4317`)
+- `OTEL_EXPORTER_OTLP_INSECURE` (`true` or `false`, default `true`)
+- `OTEL_FASTAPI_EXCLUDED_URLS` (default: `/healthz,/metrics`)
+- `OTEL_SERVICE_NAMESPACE` (default: `vellum-core`)
+- `ENVIRONMENT` (default: `dev`)
 
 ## Local Development Defaults
 
@@ -55,6 +73,8 @@ The docker-compose stack sets sane local defaults for all critical variables. Fo
 ## Best Practices
 
 - Keep `BANK_KEY_MAPPING_JSON` minimal and explicit.
+- Use `SECURITY_PROFILE=dev` only for local/non-production runs.
 - Rotate Vault Transit keys by version, then update key mapping and rollout gradually.
 - Keep `NONCE_WINDOW_SECONDS` tight in production.
+- Keep `JWT_MAX_TTL_SECONDS` low (for example <= 900) and require scopes per endpoint.
 - Set `PROVER_MAX_PARALLEL_PROOFS` based on CPU and proving artifact size, not by guesswork.

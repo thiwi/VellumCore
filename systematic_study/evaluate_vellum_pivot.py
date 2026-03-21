@@ -21,6 +21,7 @@ from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
 from vellum_core.proof_store import VellumAuditStore, VellumIntegrityService
 from vellum_core.providers import SnarkJSProvider
 from vellum_core.registry import CircuitRegistry
+from vellum_core.security import build_input_summary, compute_input_fingerprint, seal_job_payload
 from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 
 
@@ -179,6 +180,7 @@ async def enqueue_benchmark_jobs(
     *,
     db: Database,
     audit_store: VellumAuditStore,
+    vault_client: VaultTransitClient,
     settings: Settings,
     run_id: str,
     batches: int,
@@ -194,13 +196,27 @@ async def enqueue_benchmark_jobs(
             "phase": "proving_calibration",
             "index": i,
         }
+        request_payload = {"benchmark": True, "run_id": run_id}
+        sealed_payload = await seal_job_payload(
+            vault_client=vault_client,
+            key_name=settings.vellum_data_key,
+            request_payload=request_payload,
+            private_input=private_input,
+        )
         await db.create_proof_job(
             proof_id=proof_id,
             circuit_id=BATCH_CIRCUIT_ID,
             status="queued",
-            request_payload={"benchmark": True, "run_id": run_id},
-            private_input=private_input,
-            source_ref=None,
+            sealed_job_payload=sealed_payload,
+            input_fingerprint=compute_input_fingerprint(
+                source_mode="private_input",
+                payload={"private_input": private_input},
+            ),
+            input_summary=build_input_summary(
+                source_mode="private_input",
+                payload={"private_input": private_input},
+                circuit_id=BATCH_CIRCUIT_ID,
+            ),
             metadata=metadata,
         )
         await audit_store.append_event(
@@ -347,7 +363,11 @@ async def run() -> None:
     provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
     await provider.ensure_artifacts(BATCH_CIRCUIT_ID)
 
-    vault_client = VaultTransitClient(addr=settings.vault_addr, token=settings.vault_token)
+    vault_client = VaultTransitClient(
+        addr=settings.vault_addr,
+        token=settings.vault_token,
+        tls_ca_bundle=settings.tls_ca_bundle,
+    )
     key_cache = VaultPublicKeyCache(
         client=vault_client,
         ttl_seconds=settings.vault_public_key_cache_ttl_seconds,
@@ -391,6 +411,7 @@ async def run() -> None:
     proof_ids = await enqueue_benchmark_jobs(
         db=db,
         audit_store=audit_store,
+        vault_client=vault_client,
         settings=settings,
         run_id=run_id,
         batches=args.calibration_batches,

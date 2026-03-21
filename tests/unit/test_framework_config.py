@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from vellum_core.api.config import FrameworkConfig
 from vellum_core.config import Settings
 
 
-def test_framework_config_from_settings() -> None:
+def test_framework_config_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SECURITY_PROFILE", "dev")
+    monkeypatch.setenv("VELLUM_DATA_KEY", "vellum-data")
     settings = Settings.from_env()
     cfg = FrameworkConfig.from_settings(settings)
     assert cfg.app_name == settings.app_name

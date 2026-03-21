@@ -2,9 +2,11 @@
 
 ## Abstract
 
-This paper describes the mathematical structure of Vellum Core. The emphasis is on the algebraic statements encoded by the circuits, the interpretation of public and private variables, the role of rank-1 constraint systems, and the meaning of Groth16 proofs in this setting. Operational architecture is treated only insofar as it is necessary to interpret the proving model [1]-[9].
+This paper describes the mathematical structure of Vellum Core. The emphasis is on the algebraic statements encoded by the circuits, the interpretation of public and private variables, the role of rank-1 constraint systems, and the meaning of Groth16 proofs in this setting. Operational architecture is treated only insofar as it is necessary to interpret the proving model [1]-[14].
 
 Two circuits are of particular interest. `AMLCheck` is a minimal multiplicative example. `BatchCreditCheck(N)` is the substantive construction: it encodes a batch relation over balances, limits, and an active prefix, and reduces that relation to algebraic constraints over a finite field. The core mathematical features are finite-field arithmetic, arithmetized integer comparison, canonical zero-padding, and multiplicative aggregation of row-wise validity [1]-[3].
+
+In the current codebase, the intended default batch parameter is `N = 250` at three layers: circuit instantiation, manifest schema limits, and batch-preparation helpers [1], [10], [11]. This alignment requirement is operationally important and is made explicit later.
 
 ## 1. Algebraic setting
 
@@ -32,6 +34,13 @@ Accordingly, a proof should be read as an existence statement:
 > There exist private balances and intermediate values such that, together with the public limits and the public active count, all constraints of the circuit are satisfied.
 
 The zero-knowledge property ensures that the witness itself is not revealed, only the validity of the statement.
+
+At verification time, this relation appears as a public-signal vector. For `BatchCreditCheck`, Vellum manifests this vector as:
+
+- outputs first: `all_valid`, `active_count_out`;
+- then the declared public inputs: `limits`, `active_count`.
+
+So in practice, the verifier checks one ordered tuple, not separate "outputs vs. inputs" objects [10].
 
 ## 3. Finite-field arithmetic and the absence of native order
 
@@ -146,6 +155,8 @@ These relations are mathematically significant. When `chi_i = 0`, they force
 
 The inactive suffix is therefore not merely ignored; it is constrained to a canonical zero representation. This eliminates ambiguity in the encoding of shorter batches inside a fixed-size circuit.
 
+A subtle but important point: `limits` are public. So zero-padding is enforced both on private data (`balances`) and on the public batch suffix (`limits`).
+
 ### 5.5 Multiplicative aggregation
 
 Global validity is accumulated through a product chain:
@@ -183,7 +194,7 @@ such that:
 
 1. `1 <= active_count <= N`;
 2. for every `i < active_count`, `balances[i] > limits[i]`;
-3. for every `i >= active_count`, `balances[i] = 0` and `limits[i] = 0`;
+3. for every `i >= active_count`, `balances[i] = 0`, and additionally the public inputs satisfy `limits[i] = 0`;
 4. `active_count_out = active_count`;
 5. `all_valid` equals the conjunction of all active row checks.
 
@@ -206,7 +217,7 @@ The consequence is that the circuit’s ordering claims are valid only under the
 
 Without these range assumptions, the informal statement “the circuit proves `balance > limit`” is mathematically incomplete.
 
-## 8. From Circom to Groth16
+## 8. From Circom to Groth16 (and how Vellum runs it)
 
 The proving pipeline follows the standard algebraic route:
 
@@ -229,32 +240,58 @@ Groth16 is used here because it provides [8]:
 
 The usual caveat remains important: proof size is constant, but total verification work is not completely independent of the number of public inputs, because public signals contribute to the linear combination inside verification. This matters in Vellum Core because `limits[N]` are public.
 
-## 9. Constraint counts
+In the reference runtime, this algebraic pipeline is executed concretely through:
 
-The following figures were obtained by compiling the circuits with `circom --r1cs` and inspecting the resulting R1CS with `snarkjs r1cs info` for the circuits defined in [1] and [2].
+- `snarkjs groth16 fullprove` for proving,
+- `snarkjs groth16 verify` for verification,
+- integer-to-decimal-string normalization before invoking `snarkjs`.
 
-For `BatchCreditCheck(250)`:
+These details are not mathematically deep, but they are essential for correctly realizing the intended relation in production code [12].
+
+## 9. Constraint counts and parameter sensitivity
+
+Constraint counts are parameter-dependent. For `BatchCreditCheck(N)`, they scale approximately linearly in `N` because each row adds comparator logic, zero-padding constraints, and one aggregation step.
+
+For the default source configuration `N=250`, the expected order of magnitude is:
 
 - curve: `bn-128`
-- 13,032 wires
-- 13,532 constraints
-- 250 private inputs
-- 251 public inputs
-- 2 outputs
+- about 13k wires
+- about 13.5k constraints
+- 250 private inputs (`balances`)
+- 251 public inputs (`limits[250]` plus `active_count`)
+- 2 outputs (`all_valid`, `active_count_out`)
 
-For `AMLCheck`:
+For `AMLCheck`, counts are stable and minimal:
 
 - 4 wires
 - 1 constraint
 - 2 private inputs
 - 1 output
 
-These counts illustrate two structural facts:
+The important engineering consequence is not the exact integer in isolation, but consistency: the circuit parameter `N`, input-shaping code, and proving artifacts must refer to the same instance.
 
-1. `AMLCheck` is essentially a single multiplicative identity.
-2. `BatchCreditCheck(N)` scales approximately linearly in `N`, because each additional row introduces comparison logic, padding constraints, and aggregation structure.
+A simple operational check is:
 
-## 10. Interpretation of the proof statement
+`snarkjs r1cs info .build/batch_credit_check/batch_credit_check.r1cs`
+
+The reported private-input count should match the intended `N` for `balances`.
+
+## 10. Runtime enforcement of mathematical assumptions
+
+The mathematical claims above rely on bounded and canonical encodings. Vellum enforces those assumptions across multiple layers:
+
+1. Manifest-level schema bounds [10]:
+   `balances` and `limits` are fixed-length arrays (`250`) with `uint32` bounds; `active_count` is bounded (`1..250`).
+2. Batch-preparation invariants [11]:
+   helper functions pad with zeros and reject any non-zero tail in inactive rows ("anti-ghost" invariant).
+3. Worker-path validation [13]:
+   direct mode passes through preparation; `private_input` mode is revalidated for batch circuits.
+4. Provider serialization [12]:
+   integers are normalized to decimal strings before `snarkjs`, matching the expected witness input representation.
+5. Circuit/artifact coherence [1], [10], [11], [14]:
+   if `N` is changed for experiments, circuit source, manifest limits, batcher constants, and compiled artifacts must be regenerated together.
+
+## 11. Interpretation of the proof statement
 
 A Groth16 proof in this setting certifies the existence of private balances and auxiliary values satisfying the encoded algebraic relation. It does not, by itself, certify:
 
@@ -267,7 +304,7 @@ The cryptographic guarantee is therefore precise but limited:
 
 > The proof establishes correctness relative to the modeled relation, not correctness of the model itself.
 
-## 11. Conclusion
+## 12. Conclusion
 
 Mathematically, Vellum Core is a concrete instance of a zk-SNARK system built from:
 
@@ -279,13 +316,15 @@ Mathematically, Vellum Core is a concrete instance of a zk-SNARK system built fr
 
 Its central batch circuit expresses a well-defined witness relation over a fixed-size array with an active prefix and canonical zero-padding. The resulting proof states that the private witness satisfies the encoded inequalities and padding conditions relative to the public inputs, without revealing the witness itself.
 
+The practical takeaway is that mathematical correctness and operational correctness are coupled: the strongest guarantees are obtained when circuit parameterization, schema validation, input normalization, and artifact generation remain strictly synchronized.
+
 ## References
 
 [1] [batch_credit_check.circom](/Users/thilowilts/Code/VellumCore/circuits/batch_credit_check/batch_credit_check.circom)
 
 [2] [aml_check.circom](/Users/thilowilts/Code/VellumCore/circuits/aml_check/aml_check.circom)
 
-[3] `circomlib` comparator implementation at `/opt/homebrew/lib/node_modules/circomlib/circuits/comparators.circom`
+[3] iden3, [`circomlib/circuits/comparators.circom`](https://github.com/iden3/circomlib/blob/master/circuits/comparators.circom)
 
 [4] Circom Documentation, [Signals](https://docs.circom.io/circom-language/signals/)
 
@@ -298,3 +337,13 @@ Its central batch circuit expresses a well-defined witness relation over a fixed
 [8] Jens Groth, [On the Size of Pairing-based Non-interactive Arguments](https://eprint.iacr.org/2016/260), IACR ePrint 2016/260
 
 [9] Bryan Parno, Craig Gentry, Jon Howell, Mariana Raykova, [Pinocchio: Nearly Practical Verifiable Computation](https://eprint.iacr.org/2013/279), IACR ePrint 2013/279
+
+[10] [circuits/batch_credit_check/manifest.json](/Users/thilowilts/Code/VellumCore/circuits/batch_credit_check/manifest.json)
+
+[11] [vellum_core/logic/batcher.py](/Users/thilowilts/Code/VellumCore/vellum_core/logic/batcher.py)
+
+[12] [vellum_core/providers/snarkjs_provider.py](/Users/thilowilts/Code/VellumCore/vellum_core/providers/snarkjs_provider.py)
+
+[13] [worker.py](/Users/thilowilts/Code/VellumCore/worker.py)
+
+[14] [systematic_study/run_systematic_study.sh](/Users/thilowilts/Code/VellumCore/systematic_study/run_systematic_study.sh)

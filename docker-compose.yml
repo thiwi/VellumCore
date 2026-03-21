@@ -1,4 +1,44 @@
 services:
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      tempo:
+        condition: service_started
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      tempo:
+        condition: service_started
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -50,6 +90,7 @@ services:
       VELLUM_JWT_KEY: vellum-jwt
       VELLUM_AUDIT_KEY: vellum-audit
       VELLUM_BANK_KEY: vellum-bank
+      VELLUM_DATA_KEY: vellum-data
     command:
       - /bin/sh
       - -c
@@ -60,6 +101,7 @@ services:
         vault write -f transit/keys/$${VELLUM_JWT_KEY} type=ed25519 || true
         vault write -f transit/keys/$${VELLUM_AUDIT_KEY} type=ed25519 || true
         vault write -f transit/keys/$${VELLUM_BANK_KEY} type=ed25519 || true
+        vault write -f transit/keys/$${VELLUM_DATA_KEY} type=aes256-gcm96 || true
         echo "vault transit bootstrap completed"
     restart: "no"
 
@@ -85,15 +127,26 @@ services:
       VELLUM_JWT_KEY: vellum-jwt
       VELLUM_AUDIT_KEY: vellum-audit
       VELLUM_BANK_KEY: vellum-bank
+      VELLUM_DATA_KEY: vellum-data
       BANK_KEY_ID: bank-key-1
       BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
 
+      SECURITY_PROFILE: dev
       JWT_ISSUER: bank.local
       JWT_AUDIENCE: sentinel-zk
       NONCE_WINDOW_SECONDS: 300
+      JWT_MAX_TTL_SECONDS: 900
+      JWT_LEEWAY_SECONDS: 30
+      METRICS_REQUIRE_AUTH: "false"
+      SUBMIT_RATE_LIMIT_PER_MINUTE: 120
       PROVER_MAX_PARALLEL_PROOFS: 2
       VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
       NATIVE_VERIFY_BASELINE_SECONDS: 0.000005
+      LOG_LEVEL: INFO
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_FASTAPI_EXCLUDED_URLS: /healthz,/metrics
     volumes:
       - ./circuits:/app/circuits:ro
       - shared_assets:/shared_assets
@@ -106,6 +159,8 @@ services:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
       interval: 10s
@@ -135,19 +190,30 @@ services:
       VELLUM_JWT_KEY: vellum-jwt
       VELLUM_AUDIT_KEY: vellum-audit
       VELLUM_BANK_KEY: vellum-bank
+      VELLUM_DATA_KEY: vellum-data
       BANK_KEY_ID: bank-key-1
       BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
 
+      SECURITY_PROFILE: dev
       JWT_ISSUER: bank.local
       JWT_AUDIENCE: sentinel-zk
       NONCE_WINDOW_SECONDS: 300
+      JWT_MAX_TTL_SECONDS: 900
+      JWT_LEEWAY_SECONDS: 30
+      SUBMIT_RATE_LIMIT_PER_MINUTE: 120
+      METRICS_REQUIRE_AUTH: "false"
       PROVER_MAX_PARALLEL_PROOFS: 2
       VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
+      WORKER_METRICS_HOST: 0.0.0.0
       WORKER_METRICS_PORT: 9108
+      LOG_LEVEL: INFO
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
     volumes:
       - ./circuits:/app/circuits:ro
       - shared_assets:/shared_assets
-    command: ["sh", "-c", "celery -A worker:celery_app worker -Q \"$$CELERY_QUEUE\" --loglevel=INFO --concurrency=\"$$PROVER_MAX_PARALLEL_PROOFS\""]
+    command: ["sh", "-c", "celery -A worker:celery_app worker -Q \"$$CELERY_QUEUE\" --loglevel=\"$$LOG_LEVEL\" --concurrency=\"$$PROVER_MAX_PARALLEL_PROOFS\""]
     ports:
       - "9108:9108"
     depends_on:
@@ -157,6 +223,8 @@ services:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     restart: unless-stopped
 
   verifier:
@@ -180,14 +248,25 @@ services:
       VELLUM_JWT_KEY: vellum-jwt
       VELLUM_AUDIT_KEY: vellum-audit
       VELLUM_BANK_KEY: vellum-bank
+      VELLUM_DATA_KEY: vellum-data
       BANK_KEY_ID: bank-key-1
       BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
 
+      SECURITY_PROFILE: dev
       JWT_ISSUER: bank.local
       JWT_AUDIENCE: sentinel-zk
       NONCE_WINDOW_SECONDS: 300
+      JWT_MAX_TTL_SECONDS: 900
+      JWT_LEEWAY_SECONDS: 30
+      METRICS_REQUIRE_AUTH: "false"
+      SUBMIT_RATE_LIMIT_PER_MINUTE: 120
       VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
       NATIVE_VERIFY_BASELINE_SECONDS: 0.000005
+      LOG_LEVEL: INFO
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_FASTAPI_EXCLUDED_URLS: /healthz,/metrics
     volumes:
       - ./circuits:/app/circuits:ro
       - shared_assets:/shared_assets
@@ -200,6 +279,8 @@ services:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8002/healthz"]
       interval: 10s
@@ -224,6 +305,13 @@ services:
       VAULT_TOKEN: root
       VELLUM_JWT_KEY: vellum-jwt
       VELLUM_BANK_KEY: vellum-bank
+      SECURITY_PROFILE: dev
+      APP_NAME: vellum-dashboard
+      LOG_LEVEL: INFO
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_FASTAPI_EXCLUDED_URLS: /healthz
     depends_on:
       prover:
         condition: service_healthy
@@ -231,6 +319,8 @@ services:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     volumes:
       - ./circuits:/app/circuits:ro
     ports:
@@ -245,3 +335,5 @@ services:
 volumes:
   shared_assets:
   postgres_data:
+  tempo_data:
+  grafana_data:

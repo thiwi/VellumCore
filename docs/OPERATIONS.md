@@ -36,6 +36,12 @@ curl -fsS http://localhost:8002/healthz
 2. **Availability risk**: prover/verifier down, queue backlog increasing.
 3. **Performance risk**: proving latency spikes, trust-speed regressions.
 
+## Incident Timeline Mapping (Regulatory Baseline)
+
+- **NYDFS Part 500**: notify superintendent within 72 hours after determining incident.
+- **FTC Safeguards Rule**: notify FTC within 30 days for qualifying events (>=500 consumers).
+- **Ransom/extortion (NYDFS)**: additional 24-hour notice for extortion payment events.
+
 ## Failure Handling
 
 ### Job stuck in `queued`
@@ -60,7 +66,12 @@ curl -fsS http://localhost:8002/healthz
 
 - Use `/metrics` on prover/verifier/worker for Prometheus scraping.
 - Track queue depth, job status counts, proving duration, and verification duration.
+- Track `vellum_security_events_total{event_type,outcome}` and investigate spikes.
+- Use `security_events` table for forensics without exposing sensitive payload data.
 - Keep dashboard auto-refresh enabled during active investigations.
+- Use Grafana (`http://localhost:3000`) with Tempo datasource for distributed traces.
+- Ensure all service logs are JSON and include trace/span correlation fields when available.
+- Prefer investigating incidents by trace first (request -> worker -> vault/db calls), then metrics.
 
 ## Backup / Recovery Notes
 

@@ -24,7 +24,6 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("request_payload", sa.JSON(), nullable=False),
         sa.Column("private_input", sa.JSON(), nullable=True),
-        sa.Column("source_ref", sa.String(length=256), nullable=True),
         sa.Column("public_signals", sa.JSON(), nullable=True),
         sa.Column("proof", sa.JSON(), nullable=True),
         sa.Column("proof_path", sa.Text(), nullable=True),

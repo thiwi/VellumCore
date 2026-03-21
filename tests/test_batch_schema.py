@@ -49,20 +49,13 @@ def test_batch_schema_rejects_uneven_lengths() -> None:
         BatchProveRequest.model_validate({"balances": [10, 20], "limits": [5]})
 
 
-def test_batch_schema_accepts_source_ref_mode() -> None:
-    payload = BatchProveRequest.model_validate({"source_ref": "legacy://batch/42"})
-    assert payload.source_ref == "legacy://batch/42"
-    assert payload.balances is None
-    assert payload.limits is None
-
-
 def test_batch_schema_rejects_mixed_modes() -> None:
     with pytest.raises(ValidationError):
         BatchProveRequest.model_validate(
             {
-                "source_ref": "legacy://batch/42",
                 "balances": [10],
                 "limits": [5],
+                "private_input": {"balance": 10, "limit": 5},
             }
         )
 
@@ -89,16 +82,6 @@ def test_batch_schema_rejects_balances_mode_for_non_batch_circuit() -> None:
         )
 
 
-def test_batch_schema_rejects_source_ref_mode_for_non_batch_circuit() -> None:
-    with pytest.raises(ValidationError):
-        BatchProveRequest.model_validate(
-            {
-                "circuit_id": "credit_check",
-                "source_ref": "legacy://batch/42",
-            }
-        )
-
-
 def test_batch_schema_rejects_private_input_mixed_with_direct_mode() -> None:
     with pytest.raises(ValidationError):
         BatchProveRequest.model_validate(
@@ -108,3 +91,8 @@ def test_batch_schema_rejects_private_input_mixed_with_direct_mode() -> None:
                 "private_input": {"balance": 10, "limit": 5},
             }
         )
+
+
+def test_batch_schema_rejects_source_ref_field() -> None:
+    with pytest.raises(ValidationError):
+        BatchProveRequest.model_validate({"source_ref": "legacy://batch/42"})

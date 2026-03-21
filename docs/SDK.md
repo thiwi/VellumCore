@@ -8,7 +8,7 @@ Use the SDK when you want to:
 
 - embed proving/verification in your own service
 - keep transport/auth concerns outside your business logic
-- swap providers/adapters via SPI without changing call sites
+- swap providers via SPI without changing call sites
 
 ## Stable Public Surface
 
@@ -18,7 +18,7 @@ Use the SDK when you want to:
   - `ProofEngine`
   - strongly typed models in `vellum_core.api.types`
 - `vellum_core.spi`
-  - extension protocols for providers, artifact stores, input adapters, signers, and job backends
+  - extension protocols for providers, artifact stores, signers, and job backends
 
 ## Minimal Usage
 

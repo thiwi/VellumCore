@@ -17,6 +17,14 @@ All error responses follow:
 ### JWT (Bearer)
 
 Protected routes require `Authorization: Bearer <token>`.
+JWTs must include: `iss`, `aud`, `sub`, `iat`, `nbf`, `exp`, `jti`.
+Tokens exceeding configured `JWT_MAX_TTL_SECONDS` are rejected.
+
+Required scopes:
+
+- prover submit/verify routes: `proofs:write`
+- prover read routes + circuits: `proofs:read`
+- audit/trust routes: `audit:read`
 
 ### Bank Handshake (prover create route)
 
@@ -46,7 +54,6 @@ Request (`BatchProveRequest`):
 - `circuit_id` (default: `batch_credit_check`)
 - one of:
   - `balances` + `limits`
-  - `source_ref`
   - `private_input`
 
 Response:
@@ -54,6 +61,10 @@ Response:
 ```json
 { "proof_id": "uuid", "status": "queued" }
 ```
+
+Possible additional failures:
+
+- `429 rate_limited` when submit rate limit is exceeded.
 
 ## Verifier Service (`:8002`)
 
@@ -112,6 +123,11 @@ Demo flow proxies:
 - `POST /api/demo/verify`
 - `GET /api/trust-speed`
 - `GET /api/circuits`
+
+## Metrics Authentication
+
+By default (`METRICS_REQUIRE_AUTH=true`), prover and verifier `/metrics`
+require bearer JWT with matching read scope.
 
 ## Status Model
 

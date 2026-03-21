@@ -35,8 +35,17 @@ class Settings:
     jwt_issuer: str
     jwt_audience: str
     nonce_window_seconds: int
+    jwt_max_ttl_seconds: int
+    jwt_leeway_seconds: int
     max_parallel_proofs: int
+    submit_rate_limit_per_minute: int
 
+    security_profile: str
+    metrics_require_auth: bool
+    vellum_data_key: str
+    tls_ca_bundle: str | None
+
+    worker_metrics_host: str
     worker_metrics_port: int
     native_verify_baseline_seconds: float
 
@@ -62,7 +71,9 @@ class Settings:
         if not isinstance(bank_key_mapping, dict):
             raise ValueError("BANK_KEY_MAPPING_JSON must decode to object")
 
-        return cls(
+        security_profile = os.getenv("SECURITY_PROFILE", "strict").strip().lower()
+        tls_ca_bundle = os.getenv("TLS_CA_BUNDLE")
+        settings = cls(
             app_name=os.getenv("APP_NAME", "vellum-core"),
             circuits_dir=circuits_dir,
             shared_assets_dir=shared_assets_dir,
@@ -87,9 +98,51 @@ class Settings:
             jwt_issuer=os.getenv("JWT_ISSUER", "bank.local"),
             jwt_audience=os.getenv("JWT_AUDIENCE", "sentinel-zk"),
             nonce_window_seconds=int(os.getenv("NONCE_WINDOW_SECONDS", "300")),
+            jwt_max_ttl_seconds=max(1, int(os.getenv("JWT_MAX_TTL_SECONDS", "900"))),
+            jwt_leeway_seconds=max(0, int(os.getenv("JWT_LEEWAY_SECONDS", "30"))),
             max_parallel_proofs=max(1, int(os.getenv("PROVER_MAX_PARALLEL_PROOFS", "2"))),
+            submit_rate_limit_per_minute=max(
+                0, int(os.getenv("SUBMIT_RATE_LIMIT_PER_MINUTE", "30"))
+            ),
+            security_profile=security_profile,
+            metrics_require_auth=_parse_bool_env("METRICS_REQUIRE_AUTH", default=True),
+            vellum_data_key=os.getenv("VELLUM_DATA_KEY", ""),
+            tls_ca_bundle=tls_ca_bundle if tls_ca_bundle else None,
+            worker_metrics_host=os.getenv("WORKER_METRICS_HOST", "127.0.0.1"),
             worker_metrics_port=int(os.getenv("WORKER_METRICS_PORT", "9108")),
             native_verify_baseline_seconds=float(
                 os.getenv("NATIVE_VERIFY_BASELINE_SECONDS", "0.000005")
             ),
         )
+        settings._validate()
+        return settings
+
+    def _validate(self) -> None:
+        if self.security_profile not in {"strict", "dev"}:
+            raise ValueError("SECURITY_PROFILE must be either 'strict' or 'dev'")
+        if not self.vellum_data_key:
+            raise ValueError("VELLUM_DATA_KEY is required")
+        if self.security_profile != "strict":
+            return
+        if self.vault_token.strip() in {"", "root"}:
+            raise ValueError("SECURITY_PROFILE=strict rejects empty or default VAULT_TOKEN")
+        if self.vault_addr.startswith("http://"):
+            raise ValueError("SECURITY_PROFILE=strict requires VAULT_ADDR to use https://")
+        if self.metrics_require_auth is False:
+            raise ValueError("SECURITY_PROFILE=strict requires METRICS_REQUIRE_AUTH=true")
+        if self.submit_rate_limit_per_minute < 1:
+            raise ValueError(
+                "SECURITY_PROFILE=strict requires SUBMIT_RATE_LIMIT_PER_MINUTE >= 1"
+            )
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")

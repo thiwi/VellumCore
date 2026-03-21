@@ -9,7 +9,7 @@
   - `vellum_core.spi`
   - `vellum_core.runtime`
 - Stable SDK types for proof generation and verification.
-- SPI interfaces for provider, artifact store, adapter, signer, and job backend.
+- SPI interfaces for provider, artifact store, signer, and job backend.
 - Framework CLI entrypoint: `vellum`.
 - Extended dashboard into framework console views for health, circuits, audit, trust-speed, and diagnostics.
 - New unit, integration, and E2E test suites with PR/nightly split markers.

@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from vellum_core.spi import ArtifactPathsView, ArtifactStore, InputAdapter, JobBackend, ProviderProofResult, Signer
+from vellum_core.spi import ArtifactPathsView, ArtifactStore, JobBackend, ProviderProofResult, Signer
 
 
 class DeterministicProofProvider:
@@ -52,18 +52,6 @@ class InMemoryArtifactStore(ArtifactStore):
     def artifacts_exist(self, circuit_id: str) -> bool:
         """Return whether a circuit is marked ready in-memory."""
         return circuit_id in self.ready
-
-
-class DeterministicInputAdapter(InputAdapter):
-    """Adapter returning deterministic balance/limit batches for tests."""
-
-    async def fetch_credit_batch(
-        self, source_ref: str, batch_size: int
-    ) -> tuple[list[int], list[int]]:
-        _ = source_ref
-        limits = [100 + i for i in range(batch_size)]
-        balances = [v + 10 for v in limits]
-        return balances, limits
 
 
 class DeterministicSigner(Signer):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from threading import Lock
 
-from prometheus_client import CONTENT_TYPE_LATEST, Gauge, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 
 vellum_proof_duration_seconds = Histogram(
@@ -20,6 +20,12 @@ vellum_verify_duration_seconds = Histogram(
 vellum_native_verify_duration_seconds = Gauge(
     "vellum_native_verify_duration_seconds",
     "Native (non-ZK) verification baseline duration in seconds.",
+)
+
+vellum_security_events_total = Counter(
+    "vellum_security_events_total",
+    "Security-relevant events emitted by services and workers.",
+    labelnames=("event_type", "outcome"),
 )
 
 _METRIC_LOCK = Lock()
@@ -48,6 +54,11 @@ def set_native_baseline(seconds: float) -> None:
     vellum_native_verify_duration_seconds.set(seconds)
     with _METRIC_LOCK:
         _native_baseline_seconds = seconds
+
+
+def observe_security_event(event_type: str, outcome: str) -> None:
+    """Increment labeled counter for one security event."""
+    vellum_security_events_total.labels(event_type=event_type, outcome=outcome).inc()
 
 
 def trust_speed_snapshot() -> dict[str, float | None]:

@@ -56,7 +56,6 @@ Prefer extension via SPI protocols:
 
 - `ProofProvider`
 - `ArtifactStore`
-- `InputAdapter`
 - `Signer`
 - `JobBackend`
 

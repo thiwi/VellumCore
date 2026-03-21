@@ -10,7 +10,9 @@ Validation checks:
 
 - issuer (`iss`)
 - audience (`aud`)
-- required claims (`sub`, `iat`, `exp`)
+- required claims (`sub`, `iat`, `nbf`, `exp`, `jti`)
+- max token lifetime (`JWT_MAX_TTL_SECONDS`)
+- scope enforcement per route (`proofs:write`, `proofs:read`, `audit:read`)
 
 ### 2) Bank request handshake (prover submit)
 
@@ -19,6 +21,7 @@ Validation checks:
 - Signature covers method, path, timestamp, nonce, and body hash.
 - Signature key is resolved through `BANK_KEY_MAPPING_JSON`.
 - Nonces are checked/stored in Redis with expiry (`NONCE_WINDOW_SECONDS`).
+- Submit requests are rate-limited in Redis (`SUBMIT_RATE_LIMIT_PER_MINUTE`).
 
 ## Audit Integrity
 
@@ -29,6 +32,7 @@ Every key lifecycle event is appended to `audit_log` with signature and hash cha
 
 ## Hardening Recommendations
 
+- Use `SECURITY_PROFILE=strict` in production; `SECURITY_PROFILE=dev` only for local stacks.
 - Replace dev Vault token and run non-dev Vault in production.
 - Restrict network access to prover/verifier/dashboard ingress points.
 - Use short JWT TTL and rotate signing keys regularly.
@@ -37,6 +41,10 @@ Every key lifecycle event is appended to `audit_log` with signature and hash cha
 
 ## Sensitive Data Handling
 
-- Private inputs are handled inside proof generation paths; avoid logging raw private payloads.
+- Incoming request payloads and private inputs are persisted encrypted as `sealed_job_payload`.
+- Worker decrypts payload only during execution and purges sealed payload after terminal status.
+- `input_fingerprint` and `input_summary` keep non-sensitive traceability for operations.
+- Security-relevant auth/rate/decrypt events are written to `security_events`.
 - Do not expose proof internals or private inputs in public logs/dashboards.
+- OTEL collector pipeline should drop sensitive attributes (`db.statement`, request/response bodies, auth headers).
 - Keep `shared_assets` and generated proof output storage permission-scoped.

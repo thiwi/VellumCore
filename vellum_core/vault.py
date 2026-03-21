@@ -26,10 +26,18 @@ class VaultSignature:
 class VaultTransitClient:
     """Minimal async client for Vault Transit signing and key retrieval."""
 
-    def __init__(self, *, addr: str, token: str, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        *,
+        addr: str,
+        token: str,
+        timeout: float = 5.0,
+        tls_ca_bundle: str | None = None,
+    ) -> None:
         self.addr = addr.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self._tls_verify: bool | str = tls_ca_bundle or True
 
     async def sign(self, key_name: str, payload: bytes) -> VaultSignature:
         """Sign bytes with transit key and return structured signature data."""
@@ -58,25 +66,36 @@ class VaultTransitClient:
         latest_version = str(max(int(v) for v in keys.keys()))
         return latest_version, keys[latest_version]
 
+    async def encrypt(self, key_name: str, plaintext: bytes) -> str:
+        """Encrypt bytes with transit key and return encoded Vault ciphertext."""
+        data = {"plaintext": base64.b64encode(plaintext).decode("utf-8")}
+        body = await self._request("POST", f"/v1/transit/encrypt/{key_name}", json=data)
+        return str(body["data"]["ciphertext"])
+
+    async def decrypt(self, key_name: str, ciphertext: str) -> bytes:
+        """Decrypt encoded Vault ciphertext and return plaintext bytes."""
+        data = {"ciphertext": ciphertext}
+        body = await self._request("POST", f"/v1/transit/decrypt/{key_name}", json=data)
+        plaintext_b64 = str(body["data"]["plaintext"])
+        return base64.b64decode(plaintext_b64)
+
     async def _request(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Execute an authenticated Vault HTTP request and decode JSON body."""
         headers = {"X-Vault-Token": self.token}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self._tls_verify) as client:
             response = await client.request(method, f"{self.addr}{path}", headers=headers, json=json)
         response.raise_for_status()
         return response.json()
 
     @staticmethod
     def decode_signature(signature: str) -> tuple[bytes, str]:
-        """Decode transit signature format `vault:vN:<base64>` with backward fallback."""
+        """Decode transit signature format `vault:vN:<base64>`."""
         matched = _VAULT_SIG_PATTERN.match(signature)
-        if matched is not None:
-            key_version = matched.group("version")
-            sig_blob = matched.group("sig")
-            return base64.b64decode(sig_blob), key_version
-
-        # Backward fallback: plain base64 signature treated as version 0.
-        return base64.b64decode(signature), "0"
+        if matched is None:
+            raise ValueError("Vault signature must use transit format vault:vN:<base64>")
+        key_version = matched.group("version")
+        sig_blob = matched.group("sig")
+        return base64.b64decode(sig_blob), key_version
 
 
 class VaultPublicKeyCache:

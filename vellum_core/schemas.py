@@ -23,7 +23,7 @@ class CircuitManifest(BaseModel):
 
 
 class BatchProveRequest(BaseModel):
-    """Prover submit request supporting direct, source-ref, or private-input mode."""
+    """Prover submit request supporting direct or private-input mode."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -34,7 +34,6 @@ class BatchProveRequest(BaseModel):
     limits: list[int] | None = Field(
         default=None, min_length=1, max_length=MAX_BATCH_SIZE
     )
-    source_ref: str | None = Field(default=None, min_length=1, max_length=256)
     private_input: dict[str, Any] | None = None
     request_id: str | None = None
 
@@ -42,13 +41,12 @@ class BatchProveRequest(BaseModel):
     def validate_input_mode(self) -> "BatchProveRequest":
         """Enforce exactly one input mode and batch-circuit-specific constraints."""
         using_balances_limits = self.balances is not None or self.limits is not None
-        using_source = self.source_ref is not None
         using_private_input = self.private_input is not None
 
-        modes = int(using_balances_limits) + int(using_source) + int(using_private_input)
+        modes = int(using_balances_limits) + int(using_private_input)
         if modes != 1:
             raise ValueError(
-                "Provide exactly one input mode: balances/limits or source_ref or private_input"
+                "Provide exactly one input mode: balances/limits or private_input"
             )
 
         if using_balances_limits:
@@ -60,11 +58,6 @@ class BatchProveRequest(BaseModel):
                 raise ValueError(
                     "balances/limits mode is only supported for circuit_id=batch_credit_check"
                 )
-
-        if using_source and self.circuit_id != DEFAULT_BATCH_CIRCUIT_ID:
-            raise ValueError(
-                "source_ref mode is only supported for circuit_id=batch_credit_check"
-            )
 
         return self
 

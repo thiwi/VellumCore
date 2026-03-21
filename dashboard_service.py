@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import socket
 import time
@@ -18,7 +19,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 try:
-    from vellum_core.auth import VaultJWTSigner
+    from vellum_core.auth import VaultJWTSigner, build_canonical_request_string
 except ModuleNotFoundError:  # pragma: no cover - optional dependency for lightweight test envs
     class VaultJWTSigner:  # type: ignore[no-redef]
         def __init__(
@@ -31,11 +32,29 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency for lightw
         ) -> None:
             _ = (vault_client, key_name, issuer, audience)
 
-        async def sign(self, *, subject: str, ttl_seconds: int = 3600) -> str:
-            _ = (subject, ttl_seconds)
+        async def sign(
+            self,
+            *,
+            subject: str,
+            ttl_seconds: int = 3600,
+            scopes: set[str] | list[str] | tuple[str, ...] | None = None,
+        ) -> str:
+            _ = (subject, ttl_seconds, scopes)
             return "dev-dashboard-token"
 
+    def build_canonical_request_string(
+        *,
+        method: str,
+        path: str,
+        timestamp: str,
+        nonce: str,
+        raw_body: bytes,
+    ) -> str:
+        body_hash = hashlib.sha256(raw_body).hexdigest()
+        return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
+
 from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.vault import VaultTransitClient
 
 
@@ -45,7 +64,6 @@ class DemoBatchProveRequest(BaseModel):
     circuit_id: str | None = None
     balances: list[int] | None = None
     limits: list[int] | None = None
-    source_ref: str | None = None
     private_input: dict[str, Any] | None = None
 
 
@@ -61,6 +79,7 @@ class DashboardConfig:
     """Environment-backed configuration for dashboard upstream integrations."""
 
     def __init__(self) -> None:
+        self.app_name = os.getenv("APP_NAME", "vellum-dashboard")
         self.prover_url = os.getenv("PROVER_URL", "http://prover:8001")
         self.verifier_url = os.getenv("VERIFIER_URL", "http://verifier:8002")
         self.worker_metrics_url = os.getenv("WORKER_METRICS_URL", "http://worker:9108/metrics")
@@ -73,6 +92,7 @@ class DashboardConfig:
         self.vault_token = os.getenv("VAULT_TOKEN", "root")
         self.vault_jwt_key = os.getenv("VELLUM_JWT_KEY", "vellum-jwt")
         self.vault_bank_key = os.getenv("VELLUM_BANK_KEY", "vellum-bank")
+        self.tls_ca_bundle = os.getenv("TLS_CA_BUNDLE")
 
         self.redis_host = os.getenv("REDIS_HOST", "redis")
         self.redis_port = int(os.getenv("REDIS_PORT", "6379"))
@@ -81,7 +101,13 @@ class DashboardConfig:
 
 
 config = DashboardConfig()
-vault_client = VaultTransitClient(addr=config.vault_addr, token=config.vault_token)
+configure_logging(config.app_name)
+logger = logging.getLogger(__name__)
+vault_client = VaultTransitClient(
+    addr=config.vault_addr,
+    token=config.vault_token,
+    tls_ca_bundle=config.tls_ca_bundle,
+)
 jwt_signer = VaultJWTSigner(
     vault_client=vault_client,
     key_name=config.vault_jwt_key,
@@ -91,19 +117,33 @@ jwt_signer = VaultJWTSigner(
 
 app = FastAPI(title="Vellum Framework Console", version="4.0.0")
 register_exception_handlers(app)
+init_telemetry(
+    service_name=config.app_name,
+    fastapi_app=app,
+    instrument_httpx=True,
+)
 
 
 async def _jwt_token() -> str:
     """Mint dashboard-internal bearer token for upstream service calls."""
-    return await jwt_signer.sign(subject="dashboard-demo-user")
+    return await jwt_signer.sign(
+        subject="dashboard-demo-user",
+        ttl_seconds=600,
+        scopes={"proofs:write", "proofs:read", "audit:read"},
+    )
 
 
 async def _handshake_headers(method: str, path: str, body: bytes) -> dict[str, str]:
     """Build bank-signature headers used for prover submit calls."""
     ts = str(int(time.time()))
     nonce = str(uuid4())
-    body_hash = hashlib.sha256(body).hexdigest()
-    canonical = f"{method}\n{path}\n{ts}\n{nonce}\n{body_hash}".encode("utf-8")
+    canonical = build_canonical_request_string(
+        method=method,
+        path=path,
+        timestamp=ts,
+        nonce=nonce,
+        raw_body=body,
+    ).encode("utf-8")
     signature = await vault_client.sign(config.vault_bank_key, canonical)
     return {
         "X-Bank-Key-Id": config.bank_key_id,
@@ -136,6 +176,10 @@ def _upstream_error(service: str, response: httpx.Response) -> APIError:
         details["response"] = response.json()
     except Exception:
         details["response"] = response.text
+    logger.warning(
+        "upstream_error",
+        extra={"service": service, "status_code": response.status_code},
+    )
     return APIError(
         status_code=response.status_code,
         code="upstream_error",
@@ -205,6 +249,10 @@ async def _framework_health_snapshot() -> dict[str, Any]:
         for item in checks
     }
     status = "ok" if all(item["ok"] for item in checks) else "degraded"
+    logger.info(
+        "framework_health_snapshot",
+        extra={"status": status},
+    )
     return {"status": status, "components": components}
 
 

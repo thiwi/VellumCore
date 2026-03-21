@@ -3,7 +3,6 @@
 from vellum_core.spi.interfaces import (
     ArtifactPathsView,
     ArtifactStore,
-    InputAdapter,
     JobBackend,
     ProofProvider,
     ProviderProofResult,
@@ -13,7 +12,6 @@ from vellum_core.spi.interfaces import (
 __all__ = [
     "ArtifactPathsView",
     "ArtifactStore",
-    "InputAdapter",
     "JobBackend",
     "ProofProvider",
     "ProviderProofResult",

@@ -4,23 +4,28 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
-import hashlib
 import json
+import logging
 import os
 import statistics
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import docker
 import httpx
-import jwt
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+from vellum_core.auth import VaultJWTSigner, build_canonical_request_string
+from vellum_core.observability import configure_logging, init_telemetry
+from vellum_core.vault import VaultTransitClient
+
+
+configure_logging(os.getenv("APP_NAME", "vellum-stress-tester"))
+init_telemetry(
+    service_name=os.getenv("APP_NAME", "vellum-stress-tester"),
+    instrument_httpx=True,
+)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,57 +50,88 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jwt-issuer", default=os.getenv("JWT_ISSUER", "bank.local"))
     parser.add_argument("--jwt-audience", default=os.getenv("JWT_AUDIENCE", "sentinel-zk"))
     parser.add_argument("--bank-key-id", default=os.getenv("BANK_KEY_ID", "bank-key-1"))
-    parser.add_argument(
-        "--jwt-private-key-path",
-        default=os.getenv("JWT_PRIVATE_KEY_PATH", "/app/config/dev_jwt_private.pem"),
-    )
-    parser.add_argument(
-        "--bank-private-key-path",
-        default=os.getenv("BANK_PRIVATE_KEY_PATH", "/app/config/dev_bank_private.pem"),
-    )
+    parser.add_argument("--vault-addr", default=os.getenv("VAULT_ADDR", "http://vault:8200"))
+    parser.add_argument("--vault-token", default=os.getenv("VAULT_TOKEN", "root"))
+    parser.add_argument("--vault-bank-key", default=os.getenv("VELLUM_BANK_KEY", "vellum-bank"))
+    parser.add_argument("--vault-jwt-key", default=os.getenv("VELLUM_JWT_KEY", "vellum-jwt"))
     return parser.parse_args()
 
 
-def build_jwt_token(jwt_issuer: str, jwt_audience: str, private_key_path: Path) -> str:
+async def build_jwt_token(
+    *,
+    vault_client: VaultTransitClient,
+    vault_jwt_key: str,
+    jwt_issuer: str,
+    jwt_audience: str,
+) -> str:
     """Create short-lived JWT used to call authenticated service endpoints."""
-    now = int(time.time())
-    claims = {
-        "iss": jwt_issuer,
-        "aud": jwt_audience,
-        "sub": "stress-tester",
-        "iat": now,
-        "exp": now + 3600,
-    }
-    key = private_key_path.read_text(encoding="utf-8")
-    return jwt.encode(claims, key, algorithm="RS256")
+    signer = VaultJWTSigner(
+        vault_client=vault_client,
+        key_name=vault_jwt_key,
+        issuer=jwt_issuer,
+        audience=jwt_audience,
+    )
+    return await signer.sign(
+        subject="stress-tester",
+        ttl_seconds=600,
+        scopes={"proofs:write", "proofs:read"},
+    )
 
 
-def build_handshake_headers(
+async def build_handshake_headers(
     *,
     method: str,
     path: str,
     body: bytes,
     bank_key_id: str,
-    bank_private_key_path: Path,
+    vault_client: VaultTransitClient,
+    vault_bank_key: str,
 ) -> dict[str, str]:
     """Build bank-signature handshake headers for prover submit requests."""
     ts = str(int(time.time()))
     nonce = str(uuid4())
-    body_hash = hashlib.sha256(body).hexdigest()
-    canonical = f"{method}\n{path}\n{ts}\n{nonce}\n{body_hash}"
-    key = load_pem_private_key(bank_private_key_path.read_bytes(), password=None)
-    signature = key.sign(canonical.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+    canonical = build_canonical_request_string(
+        method=method,
+        path=path,
+        timestamp=ts,
+        nonce=nonce,
+        raw_body=body,
+    ).encode("utf-8")
+    signature = await _vault_sign(
+        vault_client=vault_client,
+        vault_bank_key=vault_bank_key,
+        payload=canonical,
+    )
     return {
         "X-Bank-Key-Id": bank_key_id,
         "X-Bank-Timestamp": ts,
         "X-Bank-Nonce": nonce,
-        "X-Bank-Signature": base64.b64encode(signature).decode("utf-8"),
+        "X-Bank-Signature": signature,
     }
+
+
+async def _vault_sign(
+    *,
+    vault_client: VaultTransitClient,
+    vault_bank_key: str,
+    payload: bytes,
+) -> str:
+    signature = await vault_client.sign(vault_bank_key, payload)
+    return signature.encoded
+
+
+def _docker_from_env() -> Any:
+    """Create docker SDK client or raise a clear runtime dependency error."""
+    try:
+        import docker
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("python package 'docker' is required for stress_tester") from exc
+    return docker.from_env()
 
 
 def detect_prover_container() -> str:
     """Resolve active prover container id via compose service label."""
-    client = docker.from_env()
+    client = _docker_from_env()
     containers = client.containers.list(
         all=True, filters={"label": "com.docker.compose.service=prover"}
     )
@@ -133,7 +169,7 @@ async def monitor_resources(
     *, container_id: str, stop: asyncio.Event, interval_seconds: float = 1.0
 ) -> dict[str, float]:
     """Sample container CPU/RSS metrics until stop event is set."""
-    client = docker.from_env()
+    client = _docker_from_env()
     cpu_samples: list[float] = []
     rss_peak = 0.0
 
@@ -161,7 +197,8 @@ async def submit_and_wait(
     prover_url: str,
     token: str,
     bank_key_id: str,
-    bank_private_key_path: Path,
+    vault_client: VaultTransitClient,
+    vault_bank_key: str,
     circuit_id: str,
     private_input: dict[str, Any],
 ) -> tuple[float, str]:
@@ -172,12 +209,13 @@ async def submit_and_wait(
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
-        **build_handshake_headers(
+        **await build_handshake_headers(
             method="POST",
             path=path,
             body=body,
             bank_key_id=bank_key_id,
-            bank_private_key_path=bank_private_key_path,
+            vault_client=vault_client,
+            vault_bank_key=vault_bank_key,
         ),
     }
 
@@ -255,7 +293,8 @@ async def run_phase(
     prover_url: str,
     token: str,
     bank_key_id: str,
-    bank_private_key_path: Path,
+    vault_client: VaultTransitClient,
+    vault_bank_key: str,
     container_id: str,
 ) -> dict[str, Any]:
     """Execute one stress phase and return aggregated performance report."""
@@ -277,7 +316,8 @@ async def run_phase(
                     prover_url=prover_url,
                     token=token,
                     bank_key_id=bank_key_id,
-                    bank_private_key_path=bank_private_key_path,
+                    vault_client=vault_client,
+                    vault_bank_key=vault_bank_key,
                     circuit_id=cfg.circuit_id,
                     private_input=build_input_for_circuit(cfg.circuit_id, index),
                 )
@@ -319,10 +359,15 @@ async def main_async(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    token = build_jwt_token(
+    vault_client = VaultTransitClient(
+        addr=args.vault_addr,
+        token=args.vault_token,
+    )
+    token = await build_jwt_token(
+        vault_client=vault_client,
+        vault_jwt_key=args.vault_jwt_key,
         jwt_issuer=args.jwt_issuer,
         jwt_audience=args.jwt_audience,
-        private_key_path=Path(args.jwt_private_key_path),
     )
     prover_container_id = detect_prover_container()
 
@@ -339,7 +384,8 @@ async def main_async(args: argparse.Namespace) -> None:
             prover_url=args.prover_url,
             token=token,
             bank_key_id=args.bank_key_id,
-            bank_private_key_path=Path(args.bank_private_key_path),
+            vault_client=vault_client,
+            vault_bank_key=args.vault_bank_key,
             container_id=prover_container_id,
         )
         phase_reports.append(report)
@@ -352,14 +398,23 @@ async def main_async(args: argparse.Namespace) -> None:
     }
     output_path.write_text(json.dumps(final_report, indent=2), encoding="utf-8")
 
-    print(f"Stress report written: {output_path}")
+    logger.info("stress_report_written", extra={"output_path": str(output_path)})
     for phase in phase_reports:
-        print(
-            f"{phase['phase']}: "
-            f"p95={phase['latency_seconds']['p95']:.3f}s, "
-            f"cpu_peak={phase['resource_usage']['cpu_peak_percent']:.1f}%, "
-            f"rss_peak={int(phase['resource_usage']['rss_peak_bytes'] / (1024*1024))}MiB, "
-            f"throttling={phase['thermal_indicator']['throttling_suspected']}"
+        logger.info(
+            "stress_phase_summary",
+            extra={
+                "phase": phase["phase"],
+                "p95_seconds": round(float(phase["latency_seconds"]["p95"]), 6),
+                "cpu_peak_percent": round(
+                    float(phase["resource_usage"]["cpu_peak_percent"]), 3
+                ),
+                "rss_peak_mib": int(
+                    float(phase["resource_usage"]["rss_peak_bytes"]) / (1024 * 1024)
+                ),
+                "throttling_suspected": bool(
+                    phase["thermal_indicator"]["throttling_suspected"]
+                ),
+            },
         )
 
 

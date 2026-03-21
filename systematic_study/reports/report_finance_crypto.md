@@ -2,13 +2,11 @@
 
 ## Abstract
 
-This paper examines Vellum Core from the perspective of financial institutions, market infrastructure providers, custodians, exchanges, counterparties, and audit functions. The focus is practical rather than mathematical. The central question is not how the proving system is constructed internally, but what type of operating model it enables, where its measurable benefits arise, and how it compares with more established approaches to verification and disclosure [1]-[10].
-
-Vellum Core combines batch-oriented zero-knowledge proving with a reference operating stack for proof generation, verification, artifact management, audit logging, and monitoring. In practical terms, it allows one party to retain detailed underlying records while another party verifies a succinct claim about those records. This creates a different verification model from ordinary document exchange, row-level recomputation, or conventional attestation processes [1]-[8].
+Vellum Core combines batch-oriented zero-knowledge proving with a reference operating stack for proof generation, verification, artifact management, audit logging, and monitoring. In practical terms, it allows one party to retain detailed underlying records while another party verifies a succinct claim about those records. This creates a different verification model from ordinary document exchange, row-level recomputation, or conventional attestation processes.
 
 ## 1. Executive overview
 
-Vellum Core can be understood as an infrastructure layer for proving structured statements over sensitive datasets. A statement is encoded as a circuit, a proof is generated over a batch of records, and a verifier checks the resulting proof using public inputs and a verification key. The process is embedded in an operational flow that includes proof job management, artifact control, audit logging, and service observability [1]-[8].
+Vellum Core can be understood as an infrastructure layer for proving structured statements over sensitive datasets. A statement is encoded as a circuit, a proof is generated over a batch of records, and a verifier checks the resulting proof using public inputs and a verification key. The process is embedded in an operational flow that includes proof job management, artifact control, audit logging, and service observability.
 
 For finance and crypto use cases, the main significance of this model lies in the separation between data possession and claim verification. One party may hold account-level or position-level data internally, while another party checks whether a defined condition has been satisfied without receiving the underlying rows in full. This pattern is relevant whenever confidentiality, external review, and repeatable verification are required simultaneously.
 
@@ -233,6 +231,6 @@ The main benefits are most visible where verifier-side effort, repeated review, 
 
 [8] [docs/SDK.md](/Users/thilowilts/Code/VellumCore/docs/SDK.md)
 
-[9] [study_results/results_batch_100.json](/Users/thilowilts/Code/VellumCore/systematic_study/study_results/results_batch_100.json), [study_results/results_batch_250.json](/Users/thilowilts/Code/VellumCore/systematic_study/study_results/results_batch_250.json), [study_results/results_batch_500.json](/Users/thilowilts/Code/VellumCore/systematic_study/study_results/results_batch_500.json), [study_results/results_batch_750.json](/Users/thilowilts/Code/VellumCore/systematic_study/study_results/results_batch_750.json)
+[9] [systematic_vellum_analysis.py](/Users/thilowilts/Code/VellumCore/systematic_study/systematic_vellum_analysis.py)
 
-[10] [study_results/results_batch_1000.json](/Users/thilowilts/Code/VellumCore/systematic_study/study_results/results_batch_1000.json)
+[10] [evaluate_vellum_pivot.py](/Users/thilowilts/Code/VellumCore/systematic_study/evaluate_vellum_pivot.py)

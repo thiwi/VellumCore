@@ -8,7 +8,7 @@ from vellum_core.api.circuit_manager import CircuitManager
 from vellum_core.api.config import FrameworkConfig
 from vellum_core.api.proof_engine import ProofEngine
 from vellum_core.config import Settings
-from vellum_core.spi import ArtifactStore, InputAdapter, JobBackend, ProofProvider, Signer
+from vellum_core.spi import ArtifactStore, JobBackend, ProofProvider, Signer
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,6 @@ class FrameworkClient:
     proof_engine: ProofEngine
     provider: ProofProvider
     artifact_store: ArtifactStore
-    input_adapter: InputAdapter
     signer: Signer
     job_backend: JobBackend
 

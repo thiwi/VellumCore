@@ -13,3 +13,10 @@ SQLAlchemy==2.0.37
 asyncpg==0.30.0
 alembic==1.14.0
 prometheus-client==0.21.1
+opentelemetry-api==1.30.0
+opentelemetry-sdk==1.30.0
+opentelemetry-exporter-otlp-proto-grpc==1.30.0
+opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-instrumentation-httpx==0.51b0
+opentelemetry-instrumentation-celery==0.51b0
+opentelemetry-instrumentation-sqlalchemy==0.51b0

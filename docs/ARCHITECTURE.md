@@ -32,6 +32,7 @@ State dependencies:
 - **PostgreSQL**: job and audit source of truth
 - **Redis**: Celery broker + nonce replay protection
 - **Vault Transit**: JWT signing, bank request signature verification, audit signatures
+- **OpenTelemetry Collector + Tempo + Grafana**: trace ingestion, storage, and visualization
 
 ## Core Data Flow
 
@@ -47,13 +48,12 @@ State dependencies:
 `BatchProveRequest` supports exactly one mode:
 
 - `balances` + `limits` (only for `batch_credit_check`)
-- `source_ref` (only for `batch_credit_check`)
 - `private_input` (generic mode for any circuit)
 
 ## Module Map
 
 - `vellum_core.api`: stable client-facing framework API
-- `vellum_core.spi`: extension protocols (provider, artifact store, adapter, signer, job backend)
+- `vellum_core.spi`: extension protocols (provider, artifact store, signer, job backend)
 - `vellum_core.runtime`: default runtime wiring
 - `vellum_core.providers`: proof provider implementations (SnarkJS)
 - `vellum_core.registry`: circuit discovery + artifact path resolution

@@ -6,20 +6,29 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, String, Text, desc, select, text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Column,
+    DateTime,
+    Index,
+    String,
+    Text,
+    desc,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker
 
 try:
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-except ImportError:  # pragma: no cover - compatibility for older SQLAlchemy
-    async_sessionmaker = None  # type: ignore[assignment]
+    from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+except ImportError:  # SQLAlchemy < 2.0
+    _async_sessionmaker = None
 
-
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base for reference deployment tables."""
-
-    pass
+Base = declarative_base()
 
 
 class ProofJob(Base):
@@ -27,19 +36,20 @@ class ProofJob(Base):
 
     __tablename__ = "proof_jobs"
 
-    proof_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    circuit_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    request_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    private_input: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    source_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    public_signals: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
-    proof: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    proof_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    proof_id = Column(String(64), primary_key=True)
+    circuit_id = Column(String(128), nullable=False)
+    status = Column(String(32), nullable=False)
+    sealed_job_payload = Column(Text, nullable=True)
+    input_fingerprint = Column(String(128), nullable=False)
+    input_summary = Column(JSON, nullable=False, default=dict)
+    sealed_purged_at = Column(DateTime(timezone=True), nullable=True)
+    public_signals = Column(JSON, nullable=True)
+    proof = Column(JSON, nullable=True)
+    proof_path = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    meta = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class AuditLog(Base):
@@ -47,19 +57,38 @@ class AuditLog(Base):
 
     __tablename__ = "audit_log"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    proof_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    circuit_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    public_signals: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
-    proof_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    previous_entry_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    entry_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    signature: Mapped[str] = mapped_column(Text, nullable=False)
-    key_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+    proof_id = Column(String(64), nullable=True)
+    circuit_id = Column(String(128), nullable=False)
+    status = Column(String(32), nullable=False)
+    public_signals = Column(JSON, nullable=False)
+    proof_hash = Column(String(128), nullable=False)
+    previous_entry_hash = Column(String(128), nullable=False)
+    entry_hash = Column(String(128), nullable=False)
+    signature = Column(Text, nullable=False)
+    key_version = Column(String(32), nullable=False)
+    meta = Column("metadata", JSON, nullable=False, default=dict)
+    error = Column(Text, nullable=True)
+
+
+class SecurityEvent(Base):
+    """Append-only security event telemetry for auth and incident forensics."""
+
+    __tablename__ = "security_events"
+    __table_args__ = (
+        Index("ix_security_events_timestamp", "timestamp"),
+        Index("ix_security_events_event_type", "event_type"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    outcome = Column(String(32), nullable=False)
+    actor = Column(String(128), nullable=True)
+    source_ip = Column(String(64), nullable=True)
+    proof_id = Column(String(64), nullable=True)
+    details = Column(JSON, nullable=False, default=dict)
 
 
 @dataclass(frozen=True)
@@ -86,11 +115,11 @@ class Database:
     def __init__(self, database_url: str) -> None:
         self.database_url = database_url
         self.engine: AsyncEngine = create_async_engine(database_url, future=True)
-        if async_sessionmaker is not None:
-            self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        else:  # pragma: no cover - compatibility for older SQLAlchemy
+        if _async_sessionmaker is not None:
+            self.session_factory = _async_sessionmaker(self.engine, expire_on_commit=False)
+        else:
             self.session_factory = sessionmaker(
-                bind=self.engine,
+                self.engine,
                 class_=AsyncSession,
                 expire_on_commit=False,
             )
@@ -106,9 +135,9 @@ class Database:
         proof_id: str,
         circuit_id: str,
         status: str,
-        request_payload: dict[str, Any],
-        private_input: dict[str, Any] | None,
-        source_ref: str | None,
+        sealed_job_payload: str,
+        input_fingerprint: str,
+        input_summary: dict[str, Any],
         metadata: dict[str, Any],
     ) -> ProofJob:
         """Insert and return a new proof job."""
@@ -118,9 +147,9 @@ class Database:
                 proof_id=proof_id,
                 circuit_id=circuit_id,
                 status=status,
-                request_payload=request_payload,
-                private_input=private_input,
-                source_ref=source_ref,
+                sealed_job_payload=sealed_job_payload,
+                input_fingerprint=input_fingerprint,
+                input_summary=input_summary,
                 meta=metadata,
                 created_at=now,
                 updated_at=now,
@@ -169,8 +198,9 @@ class Database:
             job = await session.get(ProofJob, proof_id)
             if job is None:
                 return None
+            now = _utc_now()
             job.status = status
-            job.updated_at = _utc_now()
+            job.updated_at = now
             if public_signals is not None:
                 job.public_signals = public_signals
             if proof is not None:
@@ -179,6 +209,20 @@ class Database:
                 job.proof_path = proof_path
             if error is not None:
                 job.error = error
+            await session.commit()
+            await session.refresh(job)
+            return job
+
+    async def purge_sealed_job_payload(self, *, proof_id: str) -> ProofJob | None:
+        """Delete encrypted request payload from a completed/failed job."""
+        async with self.session_factory() as session:
+            job = await session.get(ProofJob, proof_id)
+            if job is None:
+                return None
+            now = _utc_now()
+            job.sealed_job_payload = None
+            job.sealed_purged_at = now
+            job.updated_at = now
             await session.commit()
             await session.refresh(job)
             return job
@@ -234,23 +278,35 @@ class Database:
     async def count_jobs_by_status(self, status: str) -> int:
         """Return number of jobs with a given status."""
         async with self.session_factory() as session:
-            query = select(ProofJob).where(ProofJob.status == status)
+            query = select(func.count()).select_from(ProofJob).where(ProofJob.status == status)
             result = await session.execute(query)
-            return len(result.scalars().all())
+            return int(result.scalar_one())
 
-
-class DatabaseSession:
-    """Lightweight async context manager around session factory."""
-
-    def __init__(self, db: Database) -> None:
-        self.db = db
-
-    async def __aenter__(self) -> AsyncSession:
-        self.session = self.db.session_factory()
-        return self.session
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-        await self.session.close()
+    async def append_security_event(
+        self,
+        *,
+        event_type: str,
+        outcome: str,
+        actor: str | None = None,
+        source_ip: str | None = None,
+        proof_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> SecurityEvent:
+        """Persist one structured security event row."""
+        async with self.session_factory() as session:
+            row = SecurityEvent(
+                timestamp=_utc_now(),
+                event_type=event_type,
+                outcome=outcome,
+                actor=actor,
+                source_ip=source_ip,
+                proof_id=proof_id,
+                details=details or {},
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row
 
 
 def _utc_now() -> datetime:

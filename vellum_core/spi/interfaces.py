@@ -46,14 +46,6 @@ class ArtifactStore(Protocol):
     def artifacts_exist(self, circuit_id: str) -> bool: ...
 
 
-class InputAdapter(Protocol):
-    """Protocol for domain-data adapters used by source-ref proving mode."""
-
-    async def fetch_credit_batch(
-        self, source_ref: str, batch_size: int
-    ) -> tuple[list[int], list[int]]: ...
-
-
 class Signer(Protocol):
     """Protocol for signing payloads (typically backed by Vault Transit)."""
 

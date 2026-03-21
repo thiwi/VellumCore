@@ -12,13 +12,15 @@
 
 - Confirm `vault` is healthy.
 - Ensure `vault-init` completed successfully.
-- Verify transit keys exist (`vellum-jwt`, `vellum-audit`, `vellum-bank`).
+- Verify transit keys exist (`vellum-jwt`, `vellum-audit`, `vellum-bank`, `vellum-data`).
 
 ## Auth Errors
 
 ### `missing_token` / `invalid_token`
 
 - Verify bearer token is present and minted with expected issuer/audience.
+- Ensure claims include `nbf` and `jti`, and token TTL does not exceed `JWT_MAX_TTL_SECONDS`.
+- Ensure token scopes match endpoint requirements (`proofs:write`, `proofs:read`, `audit:read`).
 - Ensure verifier/prover use same JWT key and Vault source.
 
 ### `missing_handshake_headers` / `invalid_handshake_signature`
@@ -31,6 +33,11 @@
 
 - Ensure unique nonce per request.
 - Ensure timestamps are synchronized and inside nonce window.
+
+### `rate_limited`
+
+- Reduce submit burst per bank key and source IP.
+- Increase `SUBMIT_RATE_LIMIT_PER_MINUTE` only after risk review.
 
 ## Proving / Verification Issues
 
