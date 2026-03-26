@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.security import HTTPAuthorizationCredentials
 from types import SimpleNamespace
 
+import vellum_core.auth as auth_module
 from vellum_core.auth import (
     AuthManager,
     RedisNonceReplayGuard,
@@ -274,13 +275,27 @@ def test_nonce_replay_guard_rejects_stale_request() -> None:
     assert exc.value.code == "stale_request"
 
 
-def test_submit_rate_limiter_missing_redis_dependency_raises_runtime_error() -> None:
+def test_submit_rate_limiter_missing_redis_dependency_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        auth_module,
+        "_create_redis_client",
+        lambda redis_url: auth_module._MissingRedisClient(),
+    )
     limiter = RedisSubmitRateLimiter(redis_url="redis://localhost:6379/1", max_per_minute=1)
     with pytest.raises(RuntimeError, match="redis package not installed"):
         asyncio.run(limiter.check_and_store(key_id="bank-key-1", source_ip=None))
 
 
-def test_nonce_guard_missing_redis_dependency_raises_runtime_error() -> None:
+def test_nonce_guard_missing_redis_dependency_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        auth_module,
+        "_create_redis_client",
+        lambda redis_url: auth_module._MissingRedisClient(),
+    )
     guard = RedisNonceReplayGuard(redis_url="redis://localhost:6379/1", window_seconds=30)
     with pytest.raises(RuntimeError, match="redis package not installed"):
         asyncio.run(
