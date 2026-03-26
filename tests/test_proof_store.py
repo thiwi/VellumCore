@@ -1,3 +1,5 @@
+"""Tests for Proof store."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,11 +8,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from vellum_core.proof_store import VellumAuditStore, VellumIntegrityService
 from vellum_core.vault import VaultSignature
+
+pytestmark = pytest.mark.security
 
 
 @dataclass

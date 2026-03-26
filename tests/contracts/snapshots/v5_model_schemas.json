@@ -1,0 +1,257 @@
+{
+  "AttestationExportResponse": {
+    "description": "Exportable attestation bundle payload for policy runs.",
+    "properties": {
+      "artifact_digests": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Artifact Digests",
+        "type": "object"
+      },
+      "attestation_id": {
+        "title": "Attestation Id",
+        "type": "string"
+      },
+      "circuit_id": {
+        "title": "Circuit Id",
+        "type": "string"
+      },
+      "decision": {
+        "enum": [
+          "pass",
+          "fail"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "exported_at": {
+        "format": "date-time",
+        "title": "Exported At",
+        "type": "string"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
+      "policy_id": {
+        "title": "Policy Id",
+        "type": "string"
+      },
+      "policy_version": {
+        "title": "Policy Version",
+        "type": "string"
+      },
+      "proof_hash": {
+        "title": "Proof Hash",
+        "type": "string"
+      },
+      "public_signals_hash": {
+        "title": "Public Signals Hash",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      },
+      "signature_chain": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Signature Chain",
+        "type": "array"
+      }
+    },
+    "required": [
+      "attestation_id",
+      "run_id",
+      "policy_id",
+      "policy_version",
+      "circuit_id",
+      "decision",
+      "proof_hash",
+      "public_signals_hash",
+      "artifact_digests",
+      "signature_chain",
+      "metadata",
+      "exported_at"
+    ],
+    "title": "AttestationExportResponse",
+    "type": "object"
+  },
+  "PolicyRunAcceptedResponse": {
+    "description": "Asynchronous policy-run submission acknowledgment.",
+    "properties": {
+      "attestation_id": {
+        "title": "Attestation Id",
+        "type": "string"
+      },
+      "policy_id": {
+        "title": "Policy Id",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      },
+      "status": {
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "policy_id",
+      "status",
+      "attestation_id"
+    ],
+    "title": "PolicyRunAcceptedResponse",
+    "type": "object"
+  },
+  "PolicyRunRequest": {
+    "additionalProperties": false,
+    "description": "Policy-run submission request for v5 domain-oriented endpoints.",
+    "properties": {
+      "context": {
+        "additionalProperties": true,
+        "title": "Context",
+        "type": "object"
+      },
+      "evidence_payload": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Evidence Payload"
+      },
+      "evidence_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Evidence Ref"
+      },
+      "policy_id": {
+        "default": "lending_risk_v1",
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Policy Id",
+        "type": "string"
+      },
+      "request_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Request Id"
+      }
+    },
+    "title": "PolicyRunRequest",
+    "type": "object"
+  },
+  "PolicyRunStatusResponse": {
+    "description": "Status payload for one persisted policy run.",
+    "properties": {
+      "attestation_id": {
+        "title": "Attestation Id",
+        "type": "string"
+      },
+      "circuit_id": {
+        "title": "Circuit Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "decision": {
+        "anyOf": [
+          {
+            "enum": [
+              "pass",
+              "fail"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Decision"
+      },
+      "evidence_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Evidence Ref"
+      },
+      "metadata": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Metadata"
+      },
+      "policy_id": {
+        "title": "Policy Id",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      },
+      "status": {
+        "title": "Status",
+        "type": "string"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "policy_id",
+      "status",
+      "circuit_id",
+      "attestation_id",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "PolicyRunStatusResponse",
+    "type": "object"
+  }
+}

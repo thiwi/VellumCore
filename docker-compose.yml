@@ -105,6 +105,30 @@ services:
         echo "vault transit bootstrap completed"
     restart: "no"
 
+  framework-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.prover
+    image: vellum/prover:dev
+    environment:
+      APP_NAME: vellum-framework-init
+      CIRCUITS_DIR: /app/circuits
+      POLICY_PACKS_DIR: /app/policy_packs
+      SHARED_ASSETS_DIR: /shared_assets
+      PROOF_OUTPUT_DIR: /shared_assets/proofs
+      SNARKJS_BIN: snarkjs
+      SETUP_CIRCUIT_IDS: batch_credit_check
+      LOG_LEVEL: INFO
+    volumes:
+      - ./circuits:/app/circuits:ro
+      - ./policy_packs:/app/policy_packs:ro
+      - shared_assets:/shared_assets
+    command: ["/bin/sh", "-c", "/app/setup_framework.sh"]
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+    restart: "no"
+
   prover:
     build:
       context: .
@@ -113,9 +137,11 @@ services:
     environment:
       APP_NAME: vellum-prover
       CIRCUITS_DIR: /app/circuits
+      POLICY_PACKS_DIR: /app/policy_packs
       SHARED_ASSETS_DIR: /shared_assets
       PROOF_OUTPUT_DIR: /shared_assets/proofs
       SNARKJS_BIN: snarkjs
+      SETUP_CIRCUIT_IDS: batch_credit_check
 
       DATABASE_URL: postgresql+asyncpg://vellum:vellum@postgres:5432/vellum
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -149,15 +175,19 @@ services:
       OTEL_FASTAPI_EXCLUDED_URLS: /healthz,/metrics
     volumes:
       - ./circuits:/app/circuits:ro
+      - ./policy_packs:/app/policy_packs:ro
       - shared_assets:/shared_assets
     ports:
       - "8001:8001"
+    command: ["uvicorn", "prover_service:app", "--host", "0.0.0.0", "--port", "8001"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       vault-init:
+        condition: service_completed_successfully
+      framework-init:
         condition: service_completed_successfully
       otel-collector:
         condition: service_started
@@ -166,6 +196,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 120s
     restart: unless-stopped
 
   worker:
@@ -176,6 +207,7 @@ services:
     environment:
       APP_NAME: vellum-worker
       CIRCUITS_DIR: /app/circuits
+      POLICY_PACKS_DIR: /app/policy_packs
       SHARED_ASSETS_DIR: /shared_assets
       PROOF_OUTPUT_DIR: /shared_assets/proofs
       SNARKJS_BIN: snarkjs
@@ -212,6 +244,7 @@ services:
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     volumes:
       - ./circuits:/app/circuits:ro
+      - ./policy_packs:/app/policy_packs:ro
       - shared_assets:/shared_assets
     command: ["sh", "-c", "celery -A worker:celery_app worker -Q \"$$CELERY_QUEUE\" --loglevel=\"$$LOG_LEVEL\" --concurrency=\"$$PROVER_MAX_PARALLEL_PROOFS\""]
     ports:
@@ -220,6 +253,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      framework-init:
+        condition: service_completed_successfully
+      prover:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
@@ -235,6 +272,7 @@ services:
     environment:
       APP_NAME: vellum-verifier
       CIRCUITS_DIR: /app/circuits
+      POLICY_PACKS_DIR: /app/policy_packs
       SHARED_ASSETS_DIR: /shared_assets
       SNARKJS_BIN: snarkjs
 
@@ -269,6 +307,7 @@ services:
       OTEL_FASTAPI_EXCLUDED_URLS: /healthz,/metrics
     volumes:
       - ./circuits:/app/circuits:ro
+      - ./policy_packs:/app/policy_packs:ro
       - shared_assets:/shared_assets
     ports:
       - "8002:8002"
@@ -278,6 +317,8 @@ services:
       redis:
         condition: service_healthy
       vault-init:
+        condition: service_completed_successfully
+      framework-init:
         condition: service_completed_successfully
       otel-collector:
         condition: service_started

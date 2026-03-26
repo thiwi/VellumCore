@@ -1,3 +1,5 @@
+"""Tests for Vault client."""
+
 from __future__ import annotations
 
 import asyncio

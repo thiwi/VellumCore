@@ -14,6 +14,7 @@ class Settings:
 
     app_name: str
     circuits_dir: Path
+    policy_packs_dir: Path
     shared_assets_dir: Path
     proof_output_dir: Path
     snarkjs_bin: str
@@ -54,6 +55,7 @@ class Settings:
         """Build validated settings with defaults suitable for local/dev execution."""
         base_dir = Path(os.getenv("APP_BASE_DIR", Path.cwd()))
         circuits_dir = Path(os.getenv("CIRCUITS_DIR", str(base_dir / "circuits")))
+        policy_packs_dir = Path(os.getenv("POLICY_PACKS_DIR", str(base_dir / "policy_packs")))
         shared_assets_dir = Path(
             os.getenv("SHARED_ASSETS_DIR", str(base_dir / "shared_assets"))
         )
@@ -76,6 +78,7 @@ class Settings:
         settings = cls(
             app_name=os.getenv("APP_NAME", "vellum-core"),
             circuits_dir=circuits_dir,
+            policy_packs_dir=policy_packs_dir,
             shared_assets_dir=shared_assets_dir,
             proof_output_dir=proof_output_dir,
             snarkjs_bin=os.getenv("SNARKJS_BIN", "snarkjs"),

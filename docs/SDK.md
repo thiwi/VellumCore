@@ -1,4 +1,4 @@
-# Vellum Core SDK (v1)
+# Vellum Core SDK (v5)
 
 ## Scope
 
@@ -16,6 +16,8 @@ Use the SDK when you want to:
   - `FrameworkClient`
   - `CircuitManager`
   - `ProofEngine`
+  - `PolicyEngine`
+  - `AttestationService`
   - strongly typed models in `vellum_core.api.types`
 - `vellum_core.spi`
   - extension protocols for providers, artifact stores, signers, and job backends
@@ -23,26 +25,25 @@ Use the SDK when you want to:
 ## Minimal Usage
 
 ```python
-from vellum_core.api import FrameworkClient, ProofGenerationRequest
+from vellum_core.api import FrameworkClient, PolicyRunRequest
 
 framework = FrameworkClient.from_env()
-result = await framework.proof_engine.generate(
-    ProofGenerationRequest(
-        circuit_id="batch_credit_check",
-        private_input={
-            "balances": ["120"],
-            "limits": ["100"],
-            "active_count": "1",
-        },
+result = await framework.policy_engine.run(
+    PolicyRunRequest(
+        policy_id="lending_risk_v1",
+        evidence_payload={"balances": [120], "limits": [100]},
     )
 )
+bundle = await framework.attestation_service.export(result.attestation_id)
 ```
+
+Example script: `examples/policy_run_sdk.py`
 
 ## Best Practices
 
 - Always validate circuit artifact readiness before production rollout.
-- Keep circuit-specific request payload shaping outside core business layers.
-- Treat `ProofGenerationRequest` / `VerificationRequest` as immutable boundary objects.
+- Keep policy-specific evidence shaping outside core business layers.
+- Treat `PolicyRunRequest`, `PolicyRunResult`, and `AttestationBundle` as immutable boundary objects.
 - Prefer SPI-based substitution over editing runtime internals directly.
 
 ## Stability and Compatibility

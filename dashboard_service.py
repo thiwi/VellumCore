@@ -75,6 +75,16 @@ class DemoVerifyRequest(BaseModel):
     public_signals: list[Any]
 
 
+class DemoPolicyRunRequest(BaseModel):
+    """Request model for v5 policy-run demo flow."""
+
+    policy_id: str = "lending_risk_v1"
+    evidence_payload: dict[str, Any] | None = None
+    evidence_ref: str | None = None
+    context: dict[str, Any] | None = None
+    request_id: str | None = None
+
+
 class DashboardConfig:
     """Environment-backed configuration for dashboard upstream integrations."""
 
@@ -115,7 +125,7 @@ jwt_signer = VaultJWTSigner(
     audience=config.jwt_audience,
 )
 
-app = FastAPI(title="Vellum Framework Console", version="4.0.0")
+app = FastAPI(title="Vellum Framework Console", version="5.0.0")
 register_exception_handlers(app)
 init_telemetry(
     service_name=config.app_name,
@@ -1147,6 +1157,7 @@ async def framework_overview() -> dict[str, Any]:
 
     jobs = jobs_payload.get("items", [])
     counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
+    policy_counts = {"pass": 0, "fail": 0, "pending": 0}
     latest_failed: dict[str, Any] | None = None
     for job in jobs:
         job_status = str(job.get("status", ""))
@@ -1154,6 +1165,15 @@ async def framework_overview() -> dict[str, Any]:
             counts[job_status] += 1
         if latest_failed is None and job_status == "failed":
             latest_failed = job
+        metadata = job.get("metadata") or {}
+        if isinstance(metadata, dict) and metadata.get("policy_id"):
+            decision = metadata.get("decision")
+            if decision == "pass":
+                policy_counts["pass"] += 1
+            elif decision == "fail":
+                policy_counts["fail"] += 1
+            else:
+                policy_counts["pending"] += 1
 
     return {
         "generated_at": _iso_now(),
@@ -1164,6 +1184,7 @@ async def framework_overview() -> dict[str, Any]:
             "active": counts["queued"] + counts["running"],
             "recent_total": len(jobs),
             "latest_failed": latest_failed,
+            "policy_decisions": policy_counts,
         },
     }
 
@@ -1261,6 +1282,50 @@ async def demo_trust_speed() -> dict[str, Any]:
     """Proxy trust-speed snapshot endpoint from verifier service."""
     token = await _jwt_token()
     path = "/v1/trust-speed"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{config.verifier_url}{path}", headers=headers)
+    if response.status_code != 200:
+        raise _upstream_error("verifier", response)
+    return response.json()
+
+
+@app.post("/api/v5/policy-runs")
+async def demo_policy_run(payload: DemoPolicyRunRequest) -> dict[str, Any]:
+    """Proxy v5 policy-run creation endpoint."""
+    body = payload.model_dump_json(exclude_none=True).encode("utf-8")
+    token = await _jwt_token()
+    path = "/v5/policy-runs"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        **(await _handshake_headers("POST", path, body)),
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(f"{config.prover_url}{path}", content=body, headers=headers)
+    if response.status_code != 202:
+        raise _upstream_error("prover", response)
+    return response.json()
+
+
+@app.get("/api/v5/policy-runs/{run_id}")
+async def demo_policy_run_status(run_id: str) -> dict[str, Any]:
+    """Proxy v5 policy-run status endpoint."""
+    token = await _jwt_token()
+    path = f"/v5/policy-runs/{run_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{config.prover_url}{path}", headers=headers)
+    if response.status_code != 200:
+        raise _upstream_error("prover", response)
+    return response.json()
+
+
+@app.get("/api/v5/attestations/{attestation_id}")
+async def demo_attestation_export(attestation_id: str) -> dict[str, Any]:
+    """Proxy v5 attestation export endpoint."""
+    token = await _jwt_token()
+    path = f"/v5/attestations/{attestation_id}"
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{config.verifier_url}{path}", headers=headers)

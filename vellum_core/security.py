@@ -20,6 +20,12 @@ def compute_input_fingerprint(*, source_mode: str, payload: dict[str, Any]) -> s
     """Build deterministic SHA-256 fingerprint for sensitive request input."""
     if source_mode == "private_input":
         material: Any = payload.get("private_input")
+    elif source_mode == "policy_run":
+        material = {
+            "policy_id": payload.get("policy_id"),
+            "evidence_payload": payload.get("evidence_payload"),
+            "evidence_ref": payload.get("evidence_ref"),
+        }
     else:
         material = {
             "balances": payload.get("balances"),
@@ -42,6 +48,12 @@ def build_input_summary(*, source_mode: str, payload: dict[str, Any], circuit_id
         private_input = payload.get("private_input")
         if isinstance(private_input, dict):
             summary["private_input_keys"] = sorted(str(k) for k in private_input.keys())[:25]
+    if source_mode == "policy_run":
+        summary["policy_id"] = payload.get("policy_id")
+        evidence_payload = payload.get("evidence_payload")
+        if isinstance(evidence_payload, dict):
+            summary["evidence_keys"] = sorted(str(k) for k in evidence_payload.keys())[:25]
+        summary["has_evidence_ref"] = bool(payload.get("evidence_ref"))
     return summary
 
 

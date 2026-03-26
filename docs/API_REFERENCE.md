@@ -17,18 +17,16 @@ All error responses follow:
 ### JWT (Bearer)
 
 Protected routes require `Authorization: Bearer <token>`.
-JWTs must include: `iss`, `aud`, `sub`, `iat`, `nbf`, `exp`, `jti`.
-Tokens exceeding configured `JWT_MAX_TTL_SECONDS` are rejected.
 
 Required scopes:
 
-- prover submit/verify routes: `proofs:write`
-- prover read routes + circuits: `proofs:read`
-- audit/trust routes: `audit:read`
+- policy/proof write routes: `proofs:write`
+- proof/status and circuits routes: `proofs:read`
+- audit/attestation/trust routes: `audit:read`
 
-### Bank Handshake (prover create route)
+### Bank Handshake (submit routes)
 
-`POST /v1/proofs/batch` also requires:
+`POST /v1/proofs/batch` and `POST /v5/policy-runs` require signed anti-replay headers:
 
 - `X-Bank-Key-Id`
 - `X-Bank-Timestamp`
@@ -39,103 +37,139 @@ Canonical signature string:
 
 `<METHOD>\n<PATH>\n<TIMESTAMP>\n<NONCE>\n<SHA256(body)>`
 
-## Prover Service (`:8001`)
+## Contract and Gate Policy
 
-- `GET /healthz`
-- `GET /metrics`
-- `POST /v1/proofs/batch`
-- `GET /v1/proofs/{proof_id}`
-- `GET /v1/proofs?status=&circuit_id=&limit=`
+- v5 request/response schemas are guarded by snapshot-backed contract tests (`pytest -m contract`).
+- Security-sensitive behavior is guarded by regression tests (`pytest -m security`).
+- v1 endpoints remain available as legacy interfaces and emit deprecation/sunset headers.
 
-### `POST /v1/proofs/batch`
+## v5 Primary Surface
 
-Request (`BatchProveRequest`):
+### Prover Service (`:8001`)
 
-- `circuit_id` (default: `batch_credit_check`)
-- one of:
-  - `balances` + `limits`
-  - `private_input`
+- `POST /v5/policy-runs`
+- `GET /v5/policy-runs/{run_id}`
 
-Response:
-
-```json
-{ "proof_id": "uuid", "status": "queued" }
-```
-
-Possible additional failures:
-
-- `429 rate_limited` when submit rate limit is exceeded.
-
-## Verifier Service (`:8002`)
-
-- `GET /healthz`
-- `GET /metrics`
-- `POST /v1/verify`
-- `GET /v1/circuits`
-- `GET /v1/audit/verify-chain`
-- `GET /v1/trust-speed`
-
-### `POST /v1/verify`
+#### `POST /v5/policy-runs`
 
 Request:
 
 ```json
 {
-  "circuit_id": "batch_credit_check",
-  "proof": {},
-  "public_signals": []
+  "policy_id": "lending_risk_v1",
+  "evidence_payload": {
+    "balances": [120],
+    "limits": [100]
+  },
+  "context": {
+    "tenant": "acme-bank"
+  }
 }
 ```
+
+Alternative request (evidence by reference):
+
+```json
+{
+  "policy_id": "lending_risk_v1",
+  "evidence_ref": "memory://run-123-evidence",
+  "context": {
+    "tenant": "acme-bank"
+  }
+}
+```
+
+Validation rules:
+
+- provide `evidence_payload` or `evidence_ref`
+- `policy_id` must exist in the policy registry
+
+Response (202):
+
+```json
+{
+  "run_id": "uuid",
+  "policy_id": "lending_risk_v1",
+  "status": "queued",
+  "attestation_id": "att-uuid"
+}
+```
+
+#### `GET /v5/policy-runs/{run_id}`
 
 Response:
 
 ```json
 {
-  "valid": true,
-  "verified_at": "2026-01-01T00:00:00Z",
-  "verification_ms": 12.34
+  "run_id": "uuid",
+  "policy_id": "lending_risk_v1",
+  "status": "completed",
+  "circuit_id": "batch_credit_check",
+  "decision": "pass",
+  "attestation_id": "att-uuid",
+  "evidence_ref": "memory://run-123-evidence",
+  "metadata": {
+    "policy_version": "1.0.0"
+  }
 }
 ```
 
-## Dashboard Service (`:8000`)
+### Verifier Service (`:8002`)
 
-UI route:
+- `GET /v5/attestations/{attestation_id}`
 
-- `GET /`
+#### `GET /v5/attestations/{attestation_id}`
 
-Health:
+Response:
 
-- `GET /healthz`
+```json
+{
+  "attestation_id": "att-uuid",
+  "run_id": "uuid",
+  "policy_id": "lending_risk_v1",
+  "policy_version": "1.0.0",
+  "circuit_id": "batch_credit_check",
+  "decision": "pass",
+  "proof_hash": "sha256...",
+  "public_signals_hash": "sha256...",
+  "artifact_digests": {
+    "wasm_sha256": "...",
+    "zkey_sha256": "...",
+    "verification_key_sha256": "..."
+  },
+  "signature_chain": [
+    {
+      "audit_id": 1,
+      "entry_hash": "...",
+      "signature": "vault:v1:..."
+    }
+  ]
+}
+```
 
-Framework aggregation:
+## v5 Error Codes
 
-- `GET /api/framework/health`
-- `GET /api/framework/diagnostics`
-- `GET /api/framework/overview`
-- `GET /api/framework/circuits`
-- `GET /api/framework/audit-chain`
+Common v5 domain errors:
 
-Demo flow proxies:
+- `unknown_policy`
+- `unknown_run_id`
+- `invalid_evidence_ref`
+- `unknown_attestation_id`
+- `attestation_not_ready`
 
-- `POST /api/demo/prove`
-- `GET /api/demo/proofs/{proof_id}`
-- `GET /api/demo/proofs?status=&circuit_id=&limit=`
-- `POST /api/demo/verify`
-- `GET /api/trust-speed`
-- `GET /api/circuits`
+## v1 Legacy Surface
 
-## Metrics Authentication
+v1 remains available for transition and now emits deprecation metadata:
 
-By default (`METRICS_REQUIRE_AUTH=true`), prover and verifier `/metrics`
-require bearer JWT with matching read scope.
+- `Deprecation: true`
+- `Sunset: Tue, 30 Sep 2026 00:00:00 GMT`
 
-## Status Model
+Legacy routes:
 
-Proof job lifecycle:
+- Prover: `POST /v1/proofs/batch`, `GET /v1/proofs/{proof_id}`, `GET /v1/proofs`
+- Verifier: `POST /v1/verify`, `GET /v1/circuits`, `GET /v1/audit/verify-chain`, `GET /v1/trust-speed`
 
-- `queued`
-- `running`
-- `completed`
-- `failed`
+## Metrics
 
-Operational recommendation: treat `failed` as terminal, re-enqueue via a new request instead of mutating failed jobs.
+By default (`METRICS_REQUIRE_AUTH=true`), prover and verifier `/metrics` endpoints
+require a bearer token with matching read scope.

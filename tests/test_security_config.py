@@ -1,3 +1,5 @@
+"""Tests for Security config."""
+
 from __future__ import annotations
 
 import pytest

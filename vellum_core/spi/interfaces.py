@@ -56,3 +56,17 @@ class JobBackend(Protocol):
     """Protocol for asynchronous task dispatch."""
 
     async def enqueue(self, task_name: str, args: list[Any], queue: str) -> None: ...
+
+
+class EvidenceStore(Protocol):
+    """Protocol for policy evidence persistence and retrieval."""
+
+    async def put(self, *, run_id: str, payload: dict[str, Any]) -> str: ...
+
+    async def get(self, *, reference: str) -> dict[str, Any]: ...
+
+
+class AttestationSigner(Protocol):
+    """Protocol for signing serialized attestation payloads."""
+
+    async def sign_attestation(self, payload: bytes) -> str: ...

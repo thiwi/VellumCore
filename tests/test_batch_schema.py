@@ -1,3 +1,5 @@
+"""Tests for Batch schema."""
+
 from __future__ import annotations
 
 import pytest

@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from pathlib import Path
 from typing import Any
 
-from vellum_core.api import CircuitManager, FrameworkClient, FrameworkConfig, ProofEngine
+from vellum_core.api import (
+    AttestationService,
+    CircuitManager,
+    FrameworkClient,
+    FrameworkConfig,
+    PolicyEngine,
+    ProofEngine,
+)
 from vellum_core.config import Settings
+from vellum_core.policy_registry import PolicyRegistry
 from vellum_core.providers import SnarkJSProvider
 from vellum_core.registry import CircuitRegistry
-from vellum_core.spi import ArtifactPathsView, ArtifactStore, JobBackend, Signer
+from vellum_core.spi import (
+    ArtifactPathsView,
+    ArtifactStore,
+    AttestationSigner,
+    EvidenceStore,
+    JobBackend,
+    Signer,
+)
 from vellum_core.vault import VaultTransitClient
 
 
@@ -34,6 +52,33 @@ class FilesystemArtifactStore(ArtifactStore):
         )
 
 
+class FilesystemEvidenceStore(EvidenceStore):
+    """EvidenceStore implementation backed by JSON files on local disk."""
+
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+
+    async def put(self, *, run_id: str, payload: dict[str, Any]) -> str:
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        path = self.base_dir / f"{run_id}.json"
+        await asyncio.to_thread(
+            path.write_text,
+            json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            "utf-8",
+        )
+        return str(path)
+
+    async def get(self, *, reference: str) -> dict[str, Any]:
+        path = Path(reference)
+        if not path.exists():
+            raise FileNotFoundError(f"evidence reference does not exist: {reference}")
+        raw = await asyncio.to_thread(path.read_text, "utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("evidence payload must be a JSON object")
+        return data
+
+
 class VaultSigner(Signer):
     """Signer implementation delegating to Vault Transit."""
 
@@ -43,6 +88,17 @@ class VaultSigner(Signer):
     async def sign(self, key_name: str, payload: bytes) -> str:
         signature = await self.client.sign(key_name, payload)
         return signature.encoded
+
+
+class VaultAttestationSigner(AttestationSigner):
+    """Attestation signer that uses the configured generic Signer backend."""
+
+    def __init__(self, *, signer: Signer, key_name: str) -> None:
+        self.signer = signer
+        self.key_name = key_name
+
+    async def sign_attestation(self, payload: bytes) -> str:
+        return await self.signer.sign(self.key_name, payload)
 
 
 class CeleryJobBackend(JobBackend):
@@ -66,18 +122,40 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
     provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
     circuit_manager = CircuitManager(registry=registry, artifact_store=artifact_store)
     proof_engine = ProofEngine(provider=provider, circuit_manager=circuit_manager)
+    policy_registry = PolicyRegistry(settings.policy_packs_dir)
+    evidence_store = FilesystemEvidenceStore(settings.proof_output_dir / "evidence")
     vault_client = VaultTransitClient(
         addr=settings.vault_addr,
         token=settings.vault_token,
         tls_ca_bundle=settings.tls_ca_bundle,
+    )
+    signer = VaultSigner(vault_client)
+    attestation_signer = VaultAttestationSigner(
+        signer=signer,
+        key_name=settings.vault_audit_key,
+    )
+    attestation_service = AttestationService(
+        artifact_store=artifact_store,
+        signer=attestation_signer,
+    )
+    policy_engine = PolicyEngine(
+        proof_engine=proof_engine,
+        policy_registry=policy_registry,
+        evidence_store=evidence_store,
+        attestation_service=attestation_service,
     )
 
     return FrameworkClient(
         config=FrameworkConfig.from_settings(settings),
         circuit_manager=circuit_manager,
         proof_engine=proof_engine,
+        policy_engine=policy_engine,
+        attestation_service=attestation_service,
+        policy_registry=policy_registry,
         provider=provider,
         artifact_store=artifact_store,
-        signer=VaultSigner(vault_client),
+        signer=signer,
+        evidence_store=evidence_store,
+        attestation_signer=attestation_signer,
         job_backend=CeleryJobBackend(),
     )

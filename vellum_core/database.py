@@ -192,6 +192,7 @@ class Database:
         proof: dict[str, Any] | None = None,
         proof_path: str | None = None,
         error: str | None = None,
+        metadata_patch: dict[str, Any] | None = None,
     ) -> ProofJob | None:
         """Apply status/result updates to an existing job."""
         async with self.session_factory() as session:
@@ -209,6 +210,10 @@ class Database:
                 job.proof_path = proof_path
             if error is not None:
                 job.error = error
+            if metadata_patch:
+                merged = dict(job.meta or {})
+                merged.update(metadata_patch)
+                job.meta = merged
             await session.commit()
             await session.refresh(job)
             return job
@@ -272,6 +277,17 @@ class Database:
         """Return full audit chain ordered by id ascending."""
         async with self.session_factory() as session:
             query = select(AuditLog).order_by(AuditLog.id.asc())
+            result = await session.execute(query)
+            return list(result.scalars().all())
+
+    async def list_audit_rows_for_proof(self, *, proof_id: str) -> list[AuditLog]:
+        """Return audit rows for one proof id ordered by id ascending."""
+        async with self.session_factory() as session:
+            query = (
+                select(AuditLog)
+                .where(AuditLog.proof_id == proof_id)
+                .order_by(AuditLog.id.asc())
+            )
             result = await session.execute(query)
             return list(result.scalars().all())
 

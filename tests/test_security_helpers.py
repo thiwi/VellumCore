@@ -1,3 +1,5 @@
+"""Tests for Security helpers."""
+
 from __future__ import annotations
 
 import asyncio

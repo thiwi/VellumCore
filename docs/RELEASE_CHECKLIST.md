@@ -3,15 +3,20 @@
 ## Build and packaging
 
 - [ ] `python -m build`
-- [ ] `pip install -e .`
+- [ ] `pip install -e .[dev]`
 - [ ] `vellum circuits list --json`
+- [ ] `ruff check .`
+- [ ] `mypy vellum_core`
 
 ## Test pyramid
 
-- [ ] Unit tests: `pytest -m unit`
-- [ ] Integration tests: `pytest -m integration`
-- [ ] Critical E2E (PR gate): `RUN_E2E=1 pytest -m "e2e and critical"`
-- [ ] Nightly E2E: `RUN_E2E=1 pytest -m "e2e and nightly"`
+- [ ] Unit tests: `python -m pytest -m unit`
+- [ ] Integration tests: `python -m pytest -m integration`
+- [ ] Contract tests: `python -m pytest -m contract`
+- [ ] Security regressions: `python -m pytest -m security`
+- [ ] Critical E2E (PR gate): `RUN_E2E=1 python -m pytest -m "e2e and critical"`
+- [ ] Nightly E2E: `RUN_E2E=1 python -m pytest -m "e2e and nightly"`
+- [ ] Contract snapshots reviewed/updated in `tests/contracts/snapshots/` when API schema changes
 
 ## Documentation
 
@@ -25,7 +30,9 @@
 - [ ] Update `docs/SECURITY.md`
 - [ ] Update `docs/TROUBLESHOOTING.md`
 - [ ] Update `docs/SDK.md`
+- [ ] Update `docs/MIGRATION_V4_TO_V5.md` when breaking changes occur
 - [ ] Update `docs/COMPATIBILITY.md`
+- [ ] Update release notes in `docs/releases/` for the release tag
 - [ ] Update `CHANGELOG.md`
 
 ## Compatibility report

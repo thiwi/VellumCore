@@ -14,9 +14,11 @@ Loaded by `Settings.from_env()` in `vellum_core/config.py`.
 
 - `APP_NAME` (default: `vellum-core`)
 - `CIRCUITS_DIR` (default: `<cwd>/circuits`)
+- `POLICY_PACKS_DIR` (default: `<cwd>/policy_packs`)
 - `SHARED_ASSETS_DIR` (default: `<cwd>/shared_assets`)
 - `PROOF_OUTPUT_DIR` (default: `<shared_assets>/proofs`)
 - `SNARKJS_BIN` (default: `snarkjs`)
+- `SETUP_CIRCUIT_IDS` (optional, bootstrap filter for `setup_framework.sh`; comma-separated)
 
 ### Data Plane
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -71,6 +71,83 @@ class VerificationResult(BaseModel):
     valid: bool
     verification_ms: float
     verified_at: datetime
+
+
+class PolicyRunRequest(BaseModel):
+    """Domain-centric request for running a policy on evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    policy_id: str = Field(min_length=1)
+    evidence_payload: dict[str, Any] | None = None
+    evidence_ref: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_evidence_mode(self) -> "PolicyRunRequest":
+        if self.evidence_payload is None and self.evidence_ref is None:
+            raise ValueError("Provide evidence_payload or evidence_ref")
+        return self
+
+
+class PolicyRunResult(BaseModel):
+    """Policy execution result with compliance decision and timing snapshot."""
+
+    run_id: str
+    policy_id: str
+    decision: Literal["pass", "fail"]
+    attestation_id: str
+    timings: dict[str, float]
+
+
+class AttestationBundle(BaseModel):
+    """Exportable policy attestation package for auditability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    attestation_id: str
+    run_id: str
+    policy_id: str
+    policy_version: str
+    circuit_id: str
+    decision: Literal["pass", "fail"]
+    proof_hash: str
+    public_signals_hash: str
+    artifact_digests: dict[str, str]
+    signature_chain: list[dict[str, Any]]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    exported_at: datetime
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        attestation_id: str,
+        run_id: str,
+        policy_id: str,
+        policy_version: str,
+        circuit_id: str,
+        decision: Literal["pass", "fail"],
+        proof_hash: str,
+        public_signals_hash: str,
+        artifact_digests: dict[str, str],
+        signature_chain: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> "AttestationBundle":
+        return cls(
+            attestation_id=attestation_id,
+            run_id=run_id,
+            policy_id=policy_id,
+            policy_version=policy_version,
+            circuit_id=circuit_id,
+            decision=decision,
+            proof_hash=proof_hash,
+            public_signals_hash=public_signals_hash,
+            artifact_digests=artifact_digests,
+            signature_chain=signature_chain,
+            metadata=metadata or {},
+            exported_at=datetime.now(timezone.utc),
+        )
 
 
 class AuditResult(BaseModel):

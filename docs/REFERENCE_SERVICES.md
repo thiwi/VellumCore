@@ -9,6 +9,20 @@ The reference deployment is an operational blueprint built on top of the SDK.
 - `verifier_service.py`: proof verification, circuit status, trust-speed, and audit validation
 - `dashboard_service.py`: operations cockpit and API aggregation/proxy layer
 
+## Startup Behavior (Compose)
+
+- `framework-init` runs once to prepare circuit artifacts before service health gates.
+- `prover`, `worker`, and `verifier` depend on successful `framework-init` completion.
+- Rebuild artifacts on demand with: `docker compose run --rm framework-init`
+
+## Primary v5 Endpoints
+
+- Prover:
+  - `POST /v5/policy-runs`
+  - `GET /v5/policy-runs/{run_id}`
+- Verifier:
+  - `GET /v5/attestations/{attestation_id}`
+
 ## Intended Use
 
 - Demonstrate production-like wiring (auth, queue, storage, audit chain).

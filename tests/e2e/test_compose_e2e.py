@@ -1,3 +1,5 @@
+"""Tests for Compose e2e."""
+
 from __future__ import annotations
 
 import os

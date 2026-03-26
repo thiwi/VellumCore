@@ -7,8 +7,18 @@ from dataclasses import dataclass
 from vellum_core.api.circuit_manager import CircuitManager
 from vellum_core.api.config import FrameworkConfig
 from vellum_core.api.proof_engine import ProofEngine
+from vellum_core.api.policy_engine import PolicyEngine
+from vellum_core.api.attestation_service import AttestationService
 from vellum_core.config import Settings
-from vellum_core.spi import ArtifactStore, JobBackend, ProofProvider, Signer
+from vellum_core.policy_registry import PolicyRegistry
+from vellum_core.spi import (
+    ArtifactStore,
+    AttestationSigner,
+    EvidenceStore,
+    JobBackend,
+    ProofProvider,
+    Signer,
+)
 
 
 @dataclass(frozen=True)
@@ -18,9 +28,14 @@ class FrameworkClient:
     config: FrameworkConfig
     circuit_manager: CircuitManager
     proof_engine: ProofEngine
+    policy_engine: PolicyEngine
+    attestation_service: AttestationService
+    policy_registry: PolicyRegistry
     provider: ProofProvider
     artifact_store: ArtifactStore
     signer: Signer
+    evidence_store: EvidenceStore
+    attestation_signer: AttestationSigner
     job_backend: JobBackend
 
     @classmethod

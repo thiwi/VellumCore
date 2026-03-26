@@ -16,6 +16,7 @@ class FrameworkConfig(BaseModel):
 
     app_name: str
     circuits_dir: Path
+    policy_packs_dir: Path
     shared_assets_dir: Path
     proof_output_dir: Path
     snarkjs_bin: str
@@ -29,6 +30,7 @@ class FrameworkConfig(BaseModel):
         return cls(
             app_name=settings.app_name,
             circuits_dir=settings.circuits_dir,
+            policy_packs_dir=settings.policy_packs_dir,
             shared_assets_dir=settings.shared_assets_dir,
             proof_output_dir=settings.proof_output_dir,
             snarkjs_bin=settings.snarkjs_bin,

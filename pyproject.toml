@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vellum-core"
-version = "4.0.0"
-description = "Vellum Core SDK and reference services for batch-first ZK workflows"
+version = "5.0.0"
+description = "Compliance-ready ZK pipeline SDK and reference services for lending risk controls"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
 authors = [{name = "Vellum Core Contributors"}]
 dependencies = [
   "fastapi==0.116.1",
@@ -16,7 +17,6 @@ dependencies = [
   "cryptography==45.0.7",
   "pydantic==2.11.7",
   "jsonschema==4.25.1",
-  "pytest==8.4.2",
   "httpx==0.28.1",
   "docker==7.1.0",
   "celery==5.4.0",
@@ -25,6 +25,22 @@ dependencies = [
   "asyncpg==0.30.0",
   "alembic==1.14.0",
   "prometheus-client==0.21.1",
+  "opentelemetry-api==1.30.0",
+  "opentelemetry-sdk==1.30.0",
+  "opentelemetry-exporter-otlp-proto-grpc==1.30.0",
+  "opentelemetry-instrumentation-fastapi==0.51b0",
+  "opentelemetry-instrumentation-httpx==0.51b0",
+  "opentelemetry-instrumentation-celery==0.51b0",
+  "opentelemetry-instrumentation-sqlalchemy==0.51b0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+  "pytest-cov==6.3.0",
+  "ruff==0.13.2",
+  "mypy==1.18.1",
+  "pre-commit==4.3.0",
 ]
 
 [project.scripts]
@@ -33,3 +49,18 @@ vellum = "vellum_core.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["vellum_core*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = false
+disallow_untyped_defs = false
+pretty = true

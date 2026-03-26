@@ -46,7 +46,7 @@
 - Run artifact setup:
 
 ```bash
-docker compose exec prover /app/setup_framework.sh
+docker compose run --rm framework-init
 ```
 
 - Re-check with `vellum circuits validate --json`.

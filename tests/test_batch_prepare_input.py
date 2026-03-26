@@ -1,3 +1,5 @@
+"""Tests for Batch prepare input."""
+
 from __future__ import annotations
 
 import pytest

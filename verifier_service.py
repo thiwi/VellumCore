@@ -11,11 +11,17 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 
+from vellum_core.attestation_bundle import (
+    artifact_digests,
+    sha256_json,
+    signature_chain,
+)
 from vellum_core.api.types import VerificationRequest as EngineVerificationRequest
 from vellum_core.auth import AuthManager, BEARER_SCHEME
 from vellum_core.config import Settings
 from vellum_core.database import Database
-from vellum_core.errors import register_exception_handlers
+from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.http_legacy import mark_legacy_api
 from vellum_core.metrics import (
     observe_verify_duration,
     prometheus_payload,
@@ -28,6 +34,7 @@ from vellum_core.security import SecurityEventLogger
 from vellum_core.runtime import build_framework_client
 from vellum_core.schemas import (
     AuditChainVerifyResponse,
+    AttestationExportResponse,
     CircuitsResponse,
     HealthResponse,
     TrustSpeedResponse,
@@ -77,7 +84,7 @@ integrity_service = VellumIntegrityService(
     audit_key_name=settings.vault_audit_key,
 )
 
-app = FastAPI(title="Vellum Verifier Service", version="4.0.0")
+app = FastAPI(title="Vellum Verifier Service", version="5.0.0")
 register_exception_handlers(app)
 init_telemetry(
     service_name=settings.app_name,
@@ -109,6 +116,31 @@ def require_jwt_with_scopes(*scopes: str):
     return _dependency
 
 
+def _run_id_from_attestation_id(attestation_id: str) -> str:
+    """Extract run id from attestation id or raise APIError if format is invalid."""
+    if not attestation_id.startswith("att-"):
+        raise _unknown_attestation_id_error(attestation_id)
+    return attestation_id.removeprefix("att-")
+
+
+def _unknown_attestation_id_error(attestation_id: str) -> APIError:
+    """Return standardized unknown-attestation error payload."""
+    return APIError(
+        status_code=404,
+        code="unknown_attestation_id",
+        message="Attestation id not found",
+        details={"attestation_id": attestation_id},
+    )
+
+
+def _policy_id_from_job_metadata(*, attestation_id: str, metadata: dict[str, Any]) -> str:
+    """Resolve policy id from job metadata or raise standardized attestation error."""
+    policy_id = metadata.get("policy_id")
+    if not isinstance(policy_id, str) or policy_id == "":
+        raise _unknown_attestation_id_error(attestation_id)
+    return policy_id
+
+
 @app.get("/healthz", response_model=HealthResponse)
 async def healthcheck() -> HealthResponse:
     """Liveness/readiness endpoint."""
@@ -132,9 +164,11 @@ async def metrics(
 @app.post("/v1/verify", response_model=VerifyResponse)
 async def verify(
     payload: VerifyRequest,
+    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:write")),
 ) -> VerifyResponse:
     """Verify a proof tuple and append verification event to audit chain."""
+    mark_legacy_api(response)
     started = time.perf_counter()
     result = await framework.proof_engine.verify(
         EngineVerificationRequest(
@@ -173,9 +207,11 @@ async def verify(
 
 @app.get("/v1/circuits", response_model=CircuitsResponse)
 async def list_circuits(
+    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:read")),
 ) -> CircuitsResponse:
     """Return circuit artifact readiness list from framework manager."""
+    mark_legacy_api(response)
     return CircuitsResponse(
         circuits=[
             entry.model_dump()
@@ -186,19 +222,77 @@ async def list_circuits(
 
 @app.get("/v1/audit/verify-chain", response_model=AuditChainVerifyResponse)
 async def verify_audit_chain(
+    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("audit:read")),
 ) -> AuditChainVerifyResponse:
     """Verify full audit-chain integrity."""
+    mark_legacy_api(response)
     report = await integrity_service.verify_chain()
     return AuditChainVerifyResponse.model_validate(report)
 
 
 @app.get("/v1/trust-speed", response_model=TrustSpeedResponse)
 async def trust_speed(
+    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("audit:read")),
 ) -> TrustSpeedResponse:
     """Return trust-speed snapshot from verification metrics."""
+    mark_legacy_api(response)
     return TrustSpeedResponse.model_validate(trust_speed_snapshot())
+
+
+@app.get("/v5/attestations/{attestation_id}", response_model=AttestationExportResponse)
+async def export_attestation(
+    attestation_id: str,
+    _: dict[str, Any] = Depends(require_jwt_with_scopes("audit:read")),
+) -> AttestationExportResponse:
+    """Export compliance attestation bundle for one completed policy run."""
+    run_id = _run_id_from_attestation_id(attestation_id)
+    job = await db.get_proof_job(run_id)
+    if job is None:
+        raise _unknown_attestation_id_error(attestation_id)
+
+    metadata = job.meta or {}
+    policy_id = _policy_id_from_job_metadata(
+        attestation_id=attestation_id,
+        metadata=metadata,
+    )
+    decision = metadata.get("decision")
+    if job.status != "completed" or job.proof is None:
+        raise APIError(
+            status_code=409,
+            code="attestation_not_ready",
+            message="Attestation not ready for incomplete run",
+            details={"run_id": run_id, "status": job.status},
+        )
+
+    try:
+        policy_manifest = framework.policy_registry.get_manifest(policy_id)
+        policy_version = policy_manifest.policy_version
+    except Exception:
+        policy_version = str(metadata.get("policy_version") or "")
+
+    paths = framework.artifact_store.get_artifact_paths(job.circuit_id)
+    artifact_digest_map = artifact_digests(paths)
+    proof_hash = sha256_json(job.proof)
+    public_signals_hash = sha256_json(job.public_signals or [])
+    rows = await db.list_audit_rows_for_proof(proof_id=run_id)
+    chain = signature_chain(rows)
+
+    return AttestationExportResponse(
+        attestation_id=attestation_id,
+        run_id=run_id,
+        policy_id=policy_id,
+        policy_version=policy_version,
+        circuit_id=job.circuit_id,
+        decision="pass" if decision == "pass" else "fail",
+        proof_hash=proof_hash,
+        public_signals_hash=public_signals_hash,
+        artifact_digests=artifact_digest_map,
+        signature_chain=chain,
+        metadata=metadata,
+        exported_at=datetime.now(timezone.utc),
+    )
 
 
 if __name__ == "__main__":

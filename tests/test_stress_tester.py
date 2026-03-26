@@ -1,3 +1,5 @@
+"""Tests for Stress tester."""
+
 from __future__ import annotations
 
 import asyncio

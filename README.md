@@ -1,52 +1,43 @@
 # Vellum Core
 
-Vellum Core is a batch-first ZK framework and reference deployment stack (formerly SentinelZK / `sentinel_zk`).
+Vellum Core v5 is an open-source, compliance-ready ZK pipeline for lending risk controls.
 
-## What Is Framework vs. Reference Deployment?
+## Positioning
 
-Framework (stable contract):
+Vellum Core focuses on regulated fintech workflows:
+
+- policy-centric API surface (`PolicyEngine`, `AttestationService`)
+- signed audit chain and evidence traceability
+- reference services for prover, worker, verifier, and operations dashboard
+
+## v5 Surface (Primary)
+
+Framework contract:
+
 - `vellum_core.api`
 - `vellum_core.spi`
 - `vellum_core.runtime`
 
-Reference deployment (operational example built on SDK):
-- `prover_service.py`
-- `worker.py`
-- `verifier_service.py`
-- `dashboard_service.py`
+Primary domain objects:
 
-## Architecture (Current)
+- `PolicyRunRequest { policy_id, evidence_payload|evidence_ref, context }`
+- `PolicyRunResult { run_id, policy_id, decision, attestation_id, timings }`
+- `AttestationBundle { policy_version, circuit_id, proof_hash, public_signals_hash, artifact_digests, signature_chain }`
 
-- FastAPI prover/verifier services with JWT + bank handshake auth.
-- Celery worker for asynchronous proving.
-- PostgreSQL as system-of-record (`proof_jobs`, `audit_log`).
-- Redis for queue broker and nonce replay protection.
-- Vault Transit for JWT, bank signatures, and audit chain signing.
-- Encrypted job payload persistence (`sealed_job_payload`) with purge-on-terminal-state.
-- SnarkJS-based proof generation and verification with manifest-discovered circuits.
-- OpenTelemetry Collector + Tempo + Grafana for distributed tracing and correlation.
-
-## SDK Quick Start
+## SDK Quick Start (v5)
 
 ```python
-from vellum_core.api import FrameworkClient, ProofGenerationRequest
+from vellum_core.api import FrameworkClient, PolicyRunRequest
 
 framework = FrameworkClient.from_env()
-result = await framework.proof_engine.generate(
-    ProofGenerationRequest(
-        circuit_id="batch_credit_check",
-        private_input={"balances": ["120"], "limits": ["100"], "active_count": "1"},
+result = await framework.policy_engine.run(
+    PolicyRunRequest(
+        policy_id="lending_risk_v1",
+        evidence_payload={"balances": [120], "limits": [100]},
+        context={"tenant": "acme-bank"},
     )
 )
-```
-
-## CLI
-
-After installing package mode (`pip install -e .`):
-
-```bash
-vellum circuits list
-vellum circuits validate --json
+attestation = await framework.attestation_service.export(result.attestation_id)
 ```
 
 ## Reference Services
@@ -57,87 +48,49 @@ Start full stack:
 ./up_infra.sh
 ```
 
-Note: compose defaults to `SECURITY_PROFILE=dev` for local execution. Runtime defaults are strict.
+`framework-init` now prepares required circuit artifacts during compose startup.
 
-Compile/setup circuit artifacts:
+v5 endpoints:
 
-```bash
-docker compose exec prover /app/setup_framework.sh
-```
+- Prover: `POST /v5/policy-runs`, `GET /v5/policy-runs/{run_id}`
+- Verifier: `GET /v5/attestations/{attestation_id}`
+- Dashboard proxies:
+  - `POST /api/v5/policy-runs`
+  - `GET /api/v5/policy-runs/{run_id}`
+  - `GET /api/v5/attestations/{attestation_id}`
 
-Health checks:
+Legacy v1 endpoints remain available with deprecation headers and sunset metadata.
 
-```bash
-curl -fsS http://localhost:8000/healthz
-curl -fsS http://localhost:8001/healthz
-curl -fsS http://localhost:8002/healthz
-```
+## Development
 
-Observability UIs:
-
-- Grafana: `http://localhost:3000` (anonymous admin enabled in local compose)
-- Tempo API: `http://localhost:3200`
-
-Stop stack:
+Install runtime + dev extras:
 
 ```bash
-./down_infra.sh
+pip install -e .[dev]
 ```
 
-## API Surface (Reference Deployment)
-
-Prover:
-- `POST /v1/proofs/batch`
-- `GET /v1/proofs/{proof_id}`
-- `GET /metrics`
-
-Verifier:
-- `POST /v1/verify`
-- `GET /v1/audit/verify-chain`
-- `GET /v1/trust-speed`
-- `GET /v1/circuits`
-- `GET /metrics`
-
-Dashboard/Console:
-- Environment health view
-- Circuit/artifact status
-- Proof submit/status
-- Verification + audit-chain checks
-- Trust-speed and diagnostics
-
-## Testing Strategy
-
-- Unit tests: isolated SDK behavior and model validation.
-- Integration tests: framework runtime wiring, dashboard backend routes, artifact discovery/validation.
-- E2E tests: docker-compose flow with critical-path and nightly matrix.
-
-Commands:
+Run checks:
 
 ```bash
-pytest -m unit
-pytest -m integration
-RUN_E2E=1 pytest -m "e2e and critical"
-RUN_E2E=1 pytest -m "e2e and nightly"
+ruff check .
+mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+python -m pytest -m unit
+python -m pytest -m integration
+python -m pytest -m contract
+python -m pytest -m security
+RUN_E2E=1 python -m pytest -m "e2e and critical"
 ```
 
-## Systematic Performance Study
+## OSS Governance
 
-`systematic_study/run_systematic_study.sh` and `systematic_study/study_results/*.json`
-are kept for benchmarking evidence only.
-They are not required for framework feature validation/release gating.
+- License: Apache-2.0 (`LICENSE`)
+- Contribution guide: `CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Security process: `SECURITY.md`
 
 ## Documentation
 
 - Documentation index: [docs/README.md](docs/README.md)
-- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Migration notes: [docs/MIGRATION_V4_TO_V5.md](docs/MIGRATION_V4_TO_V5.md)
 - API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
-- Configuration: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- Operations runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
-- Development guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- Security model: [docs/SECURITY.md](docs/SECURITY.md)
-- Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- SDK: [docs/SDK.md](docs/SDK.md)
-- Reference services: [docs/REFERENCE_SERVICES.md](docs/REFERENCE_SERVICES.md)
-- Compatibility policy: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
-- Release checklist: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

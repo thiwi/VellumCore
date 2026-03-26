@@ -1,3 +1,5 @@
+"""Tests for Cli module."""
+
 from __future__ import annotations
 
 from argparse import Namespace

@@ -1,3 +1,5 @@
+"""Tests for Metrics security."""
+
 from __future__ import annotations
 
 from vellum_core import metrics

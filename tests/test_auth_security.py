@@ -1,3 +1,5 @@
+"""Tests for Auth security."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +23,8 @@ from vellum_core.auth import (
     build_canonical_request_string,
 )
 from vellum_core.errors import APIError
+
+pytestmark = pytest.mark.security
 
 
 class _FakeKeyCache:

@@ -1,3 +1,5 @@
+"""Tests for Registry."""
+
 from pathlib import Path
 
 from vellum_core.registry import CircuitRegistry

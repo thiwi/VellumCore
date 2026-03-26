@@ -26,6 +26,24 @@ default_node_modules_path() {
 }
 
 CIRCOM_LIB_PATH="${CIRCOM_LIB_PATH:-$(default_node_modules_path)}"
+SETUP_CIRCUIT_IDS="${SETUP_CIRCUIT_IDS:-}"
+
+should_compile_circuit() {
+  local circuit_id="$1"
+  if [[ -z "$SETUP_CIRCUIT_IDS" ]]; then
+    return 0
+  fi
+
+  local IFS=','
+  local requested
+  for requested in $SETUP_CIRCUIT_IDS; do
+    requested="${requested//[[:space:]]/}"
+    if [[ -n "$requested" && "$requested" == "$circuit_id" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 detect_arch() {
   local machine
@@ -172,6 +190,10 @@ main() {
 
   while IFS='|' read -r dir circuit_id; do
     [[ -n "$dir" ]] || continue
+    if ! should_compile_circuit "$circuit_id"; then
+      echo "skipping $circuit_id (not in SETUP_CIRCUIT_IDS)"
+      continue
+    fi
     compile_circuit "$dir" "$circuit_id"
   done <<< "$runnable"
 

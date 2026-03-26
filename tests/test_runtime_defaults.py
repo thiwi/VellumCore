@@ -1,3 +1,5 @@
+"""Tests for Runtime defaults."""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,6 +37,7 @@ def _make_settings(tmp_path: Path) -> Settings:
     return Settings(
         app_name="vellum-core",
         circuits_dir=tmp_path / "circuits",
+        policy_packs_dir=tmp_path / "policy_packs",
         shared_assets_dir=tmp_path / "shared_assets",
         proof_output_dir=tmp_path / "proofs",
         snarkjs_bin="snarkjs",
@@ -144,6 +147,8 @@ def test_build_framework_client_wires_dependencies(tmp_path: Path) -> None:
     assert isinstance(client.provider, defaults.SnarkJSProvider)
     assert isinstance(client.artifact_store, defaults.FilesystemArtifactStore)
     assert isinstance(client.signer, defaults.VaultSigner)
+    assert isinstance(client.evidence_store, defaults.FilesystemEvidenceStore)
+    assert isinstance(client.attestation_signer, defaults.VaultAttestationSigner)
     assert isinstance(client.job_backend, defaults.CeleryJobBackend)
 
 

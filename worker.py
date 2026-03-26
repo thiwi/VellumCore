@@ -12,13 +12,14 @@ from pathlib import Path
 from celery.signals import worker_ready
 from prometheus_client import start_http_server
 
-from vellum_core.api.types import ProofGenerationRequest
+from vellum_core.api.types import ProofGenerationRequest, VerificationRequest
 from vellum_core.celery_app import celery_app
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.logic.batcher import batch_prepare_from_private_input
 from vellum_core.metrics import observe_proof_duration
 from vellum_core.observability import configure_logging, init_telemetry
+from vellum_core.policy_runtime import decision_for_policy
 from vellum_core.proof_store import VellumAuditStore
 from vellum_core.runtime import build_framework_client
 from vellum_core.security import SecurityEventLogger, unseal_job_payload
@@ -127,6 +128,37 @@ async def _process_proof_job_async(proof_id: str) -> None:
         result = await framework.proof_engine.generate(
             ProofGenerationRequest(circuit_id=job.circuit_id, private_input=private_input)
         )
+        verify_result = await framework.proof_engine.verify(
+            VerificationRequest(
+                circuit_id=job.circuit_id,
+                proof=result.proof,
+                public_signals=result.public_signals,
+            )
+        )
+
+        metadata_patch: dict[str, str] | None = None
+        policy_id = (job.meta or {}).get("policy_id")
+        if isinstance(policy_id, str) and policy_id:
+            policy_version = ""
+            try:
+                policy_manifest = framework.policy_registry.get_manifest(policy_id)
+                policy_version = policy_manifest.policy_version
+                decision = decision_for_policy(
+                    policy_id=policy_id,
+                    public_signals=result.public_signals,
+                    verified=verify_result.valid,
+                    expected_attestation=policy_manifest.expected_attestation,
+                )
+            except Exception as exc:
+                decision = "fail"
+                logger.warning(
+                    "policy_decision_failed",
+                    extra={"proof_id": proof_id, "policy_id": policy_id, "reason": str(exc)},
+                )
+            metadata_patch = {
+                "policy_version": policy_version,
+                "decision": decision,
+            }
 
         proof_output_dir = Path(settings.proof_output_dir)
         proof_output_dir.mkdir(parents=True, exist_ok=True)
@@ -149,8 +181,13 @@ async def _process_proof_job_async(proof_id: str) -> None:
             public_signals=result.public_signals,
             proof=result.proof,
             proof_path=str(proof_path),
+            metadata_patch=metadata_patch,
         )
         await db.purge_sealed_job_payload(proof_id=proof_id)
+
+        completion_metadata = dict(job.meta or {})
+        if metadata_patch:
+            completion_metadata.update(metadata_patch)
 
         await audit_store.append_event(
             proof_id=proof_id,
@@ -158,7 +195,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
             status="completed",
             public_signals=result.public_signals,
             proof_payload=result.proof,
-            metadata=job.meta,
+            metadata=completion_metadata,
         )
         logger.info(
             "proof_job_completed",

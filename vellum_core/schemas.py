@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from vellum_core.logic.batcher import MAX_BATCH_SIZE
@@ -137,3 +137,62 @@ class CircuitsResponse(BaseModel):
     """List wrapper for circuit artifact status rows."""
 
     circuits: list[CircuitArtifactStatus]
+
+
+class PolicyRunRequest(BaseModel):
+    """Policy-run submission request for v5 domain-oriented endpoints."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    policy_id: str = Field(default="lending_risk_v1", min_length=1, max_length=128)
+    evidence_payload: dict[str, Any] | None = None
+    evidence_ref: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+    request_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_evidence_input(self) -> "PolicyRunRequest":
+        if self.evidence_payload is None and self.evidence_ref is None:
+            raise ValueError("Provide evidence_payload or evidence_ref")
+        return self
+
+
+class PolicyRunAcceptedResponse(BaseModel):
+    """Asynchronous policy-run submission acknowledgment."""
+
+    run_id: str
+    policy_id: str
+    status: str
+    attestation_id: str
+
+
+class PolicyRunStatusResponse(BaseModel):
+    """Status payload for one persisted policy run."""
+
+    run_id: str
+    policy_id: str
+    status: str
+    circuit_id: str
+    decision: Literal["pass", "fail"] | None = None
+    attestation_id: str
+    evidence_ref: str | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AttestationExportResponse(BaseModel):
+    """Exportable attestation bundle payload for policy runs."""
+
+    attestation_id: str
+    run_id: str
+    policy_id: str
+    policy_version: str
+    circuit_id: str
+    decision: Literal["pass", "fail"]
+    proof_hash: str
+    public_signals_hash: str
+    artifact_digests: dict[str, str]
+    signature_chain: list[dict[str, Any]]
+    metadata: dict[str, Any]
+    exported_at: datetime

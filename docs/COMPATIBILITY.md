@@ -3,6 +3,7 @@
 ## Versioning
 
 - Vellum Core follows SemVer for framework modules in `vellum_core.api` and `vellum_core.spi`.
+- v5 introduces a deliberate API reset toward policy-centric workflows.
 - Patch releases: bug fixes, no breaking API changes.
 - Minor releases: additive API changes; deprecations may be introduced.
 - Major releases: breaking API changes.

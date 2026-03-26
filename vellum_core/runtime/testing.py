@@ -7,7 +7,15 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from vellum_core.spi import ArtifactPathsView, ArtifactStore, JobBackend, ProviderProofResult, Signer
+from vellum_core.spi import (
+    ArtifactPathsView,
+    ArtifactStore,
+    AttestationSigner,
+    EvidenceStore,
+    JobBackend,
+    ProviderProofResult,
+    Signer,
+)
 
 
 class DeterministicProofProvider:
@@ -59,6 +67,31 @@ class DeterministicSigner(Signer):
 
     async def sign(self, key_name: str, payload: bytes) -> str:
         return f"{key_name}:{hashlib.sha256(payload).hexdigest()}"
+
+
+class InMemoryEvidenceStore(EvidenceStore):
+    """Evidence store that keeps payloads in-memory keyed by run id."""
+
+    def __init__(self) -> None:
+        self._store: dict[str, dict[str, Any]] = {}
+
+    async def put(self, *, run_id: str, payload: dict[str, Any]) -> str:
+        self._store[run_id] = payload
+        return f"memory://{run_id}"
+
+    async def get(self, *, reference: str) -> dict[str, Any]:
+        run_id = reference.removeprefix("memory://")
+        payload = self._store.get(run_id)
+        if payload is None:
+            raise KeyError(reference)
+        return payload
+
+
+class DeterministicAttestationSigner(AttestationSigner):
+    """Attestation signer returning deterministic hash-based signatures."""
+
+    async def sign_attestation(self, payload: bytes) -> str:
+        return f"attestation:{hashlib.sha256(payload).hexdigest()}"
 
 
 @dataclass

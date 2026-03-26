@@ -1,3 +1,5 @@
+"""Tests for Database layer."""
+
 from __future__ import annotations
 
 import asyncio

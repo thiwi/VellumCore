@@ -6,8 +6,9 @@ Start:
 
 ```bash
 ./up_infra.sh
-docker compose exec prover /app/setup_framework.sh
 ```
+
+`framework-init` is executed automatically during compose startup to prepare artifacts.
 
 Stop:
 
@@ -29,6 +30,8 @@ curl -fsS http://localhost:8002/healthz
 - `GET /api/framework/diagnostics` (degraded dependency details)
 - `GET /v1/circuits` (artifact readiness)
 - `GET /v1/audit/verify-chain` (audit integrity)
+- `GET /v5/policy-runs/{run_id}` (policy decision lifecycle)
+- `GET /v5/attestations/{attestation_id}` (exportable compliance evidence bundle)
 
 ## Incident Priorities
 
@@ -77,4 +80,4 @@ curl -fsS http://localhost:8002/healthz
 
 - PostgreSQL is source of truth for job and audit state.
 - `shared_assets/` must remain consistent with circuit manifests.
-- If rebuilding artifacts, re-run `setup_framework.sh` before resuming operations.
+- If rebuilding artifacts, run `docker compose run --rm framework-init` before resuming operations.

@@ -9,7 +9,7 @@
 ## Install
 
 ```bash
-pip install -e .
+pip install -e .[dev]
 ```
 
 ## Framework CLI
@@ -24,14 +24,29 @@ vellum circuits validate --json
 Run fast layers first:
 
 ```bash
-pytest -m unit
-pytest -m integration
+python -m pytest -m unit
+python -m pytest -m integration
+python -m pytest -m contract
+python -m pytest -m security
 ```
 
 Run compose E2E when changing service wiring or auth flows:
 
 ```bash
-RUN_E2E=1 pytest -m "e2e and critical"
+RUN_E2E=1 python -m pytest -m "e2e and critical"
+RUN_E2E=1 python -m pytest -m e2e -q
+```
+
+Contract snapshots:
+
+- Contract tests compare v5 HTTP/model schemas against files in `tests/contracts/snapshots/`.
+- If an intentional API contract change is made, update those snapshots in the same PR.
+
+Static checks:
+
+```bash
+ruff check .
+mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
 ```
 
 ## Coding Standards
