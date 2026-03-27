@@ -51,6 +51,9 @@ def test_batch_prepare_input_rejects_non_integer_and_out_of_range_values() -> No
     with pytest.raises(ValueError, match=r"balances\[0\] must be an integer"):
         batch_prepare_input(balances=["1"], limits=[1])  # type: ignore[list-item]
 
+    with pytest.raises(ValueError, match=r"balances\[0\] must be an integer"):
+        batch_prepare_input(balances=[True], limits=[1])  # type: ignore[list-item]
+
     with pytest.raises(ValueError, match=rf"between 0 and {MAX_UINT32}"):
         batch_prepare_input(balances=[MAX_UINT32 + 1], limits=[1])
 

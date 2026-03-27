@@ -27,8 +27,27 @@ class DeterministicProofProvider:
         digest = hashlib.sha256(
             json.dumps(private_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+        balances = private_input.get("balances")
+        limits = private_input.get("limits")
+        active_count = private_input.get("active_count")
+        all_valid = "1"
+        active_count_out = "0"
+        if isinstance(balances, list) and isinstance(limits, list) and isinstance(active_count, int):
+            try:
+                all_valid = (
+                    "1"
+                    if all(int(balances[idx]) > int(limits[idx]) for idx in range(active_count))
+                    else "0"
+                )
+                active_count_out = str(int(active_count))
+            except (TypeError, ValueError):
+                all_valid = "0"
+                active_count_out = "0"
         proof = {"circuit_id": circuit_id, "digest": digest}
-        return ProviderProofResult(proof=proof, public_signals=["1", digest[:16]])
+        return ProviderProofResult(
+            proof=proof,
+            public_signals=[all_valid, active_count_out, digest[:16]],
+        )
 
     async def verify_proof(
         self, circuit_id: str, proof: dict[str, Any], public_signals: list[Any]

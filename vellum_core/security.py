@@ -63,12 +63,14 @@ async def seal_job_payload(
     key_name: str,
     request_payload: dict[str, Any],
     private_input: dict[str, Any] | None,
+    dual_track_reference: dict[str, Any] | None = None,
 ) -> str:
     """Encrypt sensitive request payload material for DB persistence."""
     plaintext = canonical_json_bytes(
         {
             "request_payload": request_payload,
             "private_input": private_input,
+            "dual_track_reference": dual_track_reference,
         }
     )
     return await vault_client.encrypt(key_name, plaintext)

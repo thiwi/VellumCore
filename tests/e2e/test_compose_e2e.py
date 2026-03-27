@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -69,6 +70,48 @@ def _wait_proof_status(proof_id: str, timeout: int = 180) -> dict[str, Any]:
             return body
         time.sleep(2)
     raise AssertionError(f"proof {proof_id} did not complete")
+
+
+def _realistic_policy_payload(*, size: int = 64) -> dict[str, Any]:
+    limits = []
+    balances = []
+    for i in range(size):
+        limit = 90_000 + ((i * 131_071) % 1_750_000)
+        headroom = 6_000 + ((i * 9_973) % 85_000)
+        limits.append(limit)
+        balances.append(limit + headroom)
+    return {
+        "policy_id": "lending_risk_v1",
+        "evidence_payload": {
+            "balances": balances,
+            "limits": limits,
+        },
+        "context": {
+            "tenant": "e2e-bank",
+            "dataset_id": f"dual-track-e2e-{size}",
+            "reporting_period": "2026-03",
+            "source_systems": ["loan_core", "risk_mart", "ledger_dw"],
+            "as_of_utc": "2026-03-27T08:00:00Z",
+        },
+    }
+
+
+def _submit_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    response = httpx.post("http://localhost:8000/api/v5/policy-runs", json=payload, timeout=30.0)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _wait_policy_status(run_id: str, timeout: int = 180) -> dict[str, Any]:
+    started = time.time()
+    while time.time() - started < timeout:
+        response = httpx.get(f"http://localhost:8000/api/v5/policy-runs/{run_id}", timeout=20.0)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if body["status"] in {"completed", "failed"}:
+            return body
+        time.sleep(2)
+    raise AssertionError(f"policy run {run_id} did not complete")
 
 
 @pytest.mark.critical
@@ -166,3 +209,37 @@ def test_trust_speed_and_metrics(compose_stack: None) -> None:
     verifier_metrics = httpx.get("http://localhost:8002/metrics", timeout=20.0)
     assert prover_metrics.status_code == 200
     assert verifier_metrics.status_code == 200
+
+
+@pytest.mark.nightly
+def test_dual_track_mismatch_hard_fail_and_restore(compose_stack: None) -> None:
+    manifest_path = ROOT / "policy_packs" / "lending_risk_v1" / "manifest.json"
+    original_manifest = manifest_path.read_text(encoding="utf-8")
+    mismatch_run_id = ""
+    try:
+        data = json.loads(original_manifest)
+        data["differential_outputs"]["active_count_out"]["signal_index"] = 2
+        manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+        _compose("restart", "prover", "worker")
+        _wait_http("http://localhost:8000/healthz", timeout=180)
+        _wait_http("http://localhost:8001/healthz", timeout=180)
+
+        submitted = _submit_policy(_realistic_policy_payload(size=72))
+        mismatch_run_id = submitted["run_id"]
+        failed = _wait_policy_status(mismatch_run_id, timeout=180)
+        assert failed["status"] == "failed"
+        assert failed["decision"] is None
+
+        worker_logs = _compose_capture("logs", "worker", "--since", "5m").stdout
+        assert "dual_track_mismatch" in worker_logs
+    finally:
+        manifest_path.write_text(original_manifest, encoding="utf-8")
+        _compose("restart", "prover", "worker")
+        _wait_http("http://localhost:8000/healthz", timeout=180)
+        _wait_http("http://localhost:8001/healthz", timeout=180)
+
+    recovered_submit = _submit_policy(_realistic_policy_payload(size=72))
+    recovered = _wait_policy_status(recovered_submit["run_id"], timeout=180)
+    assert recovered["status"] == "completed"
+    assert recovered["decision"] == "pass"

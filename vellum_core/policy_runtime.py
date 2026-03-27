@@ -1,42 +1,41 @@
-"""Shared policy runtime helpers used by SDK and reference services."""
+"""Compatibility shims for legacy policy runtime helpers."""
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from vellum_core.api.errors import framework_error
-from vellum_core.logic.batcher import batch_prepare_input
+from vellum_core.policies.dual_track import evaluate_circuit_track, prepare_reference_track
+
+
+_REFERENCE_POLICY_BY_POLICY_ID: dict[str, str] = {
+    "lending_risk_v1": "lending_risk_reference_v1",
+}
+
+_DEFAULT_DIFFERENTIAL_OUTPUTS: dict[str, dict[str, dict[str, object]]] = {
+    "lending_risk_v1": {
+        "all_valid": {"signal_index": 0, "value_type": "bool"},
+        "active_count_out": {"signal_index": 1, "value_type": "int"},
+    }
+}
 
 
 def private_input_for_policy(*, policy_id: str, evidence_payload: dict[str, Any]) -> dict[str, Any]:
     """Map evidence payloads to proving private_input for one policy."""
-    private_input = evidence_payload.get("private_input")
-    if isinstance(private_input, dict):
-        return private_input
-
-    if policy_id == "lending_risk_v1":
-        balances = evidence_payload.get("balances")
-        limits = evidence_payload.get("limits")
-        if not isinstance(balances, list) or not isinstance(limits, list):
-            raise framework_error(
-                "invalid_evidence_payload",
-                "lending_risk_v1 requires balances and limits arrays",
-            )
-        try:
-            prepared = batch_prepare_input(balances=balances, limits=limits)
-        except ValueError as exc:
-            raise framework_error(
-                "invalid_evidence_payload",
-                "Evidence payload failed batch validation",
-                reason=str(exc),
-            ) from exc
-        return prepared.to_circuit_input()
-
-    raise framework_error(
-        "unsupported_policy_input",
-        "No policy input mapper defined",
-        policy_id=policy_id,
+    reference_policy = _REFERENCE_POLICY_BY_POLICY_ID.get(policy_id)
+    differential_outputs = _DEFAULT_DIFFERENTIAL_OUTPUTS.get(policy_id)
+    if reference_policy is None or differential_outputs is None:
+        raise framework_error(
+            "unsupported_policy_input",
+            "No policy input mapper defined",
+            policy_id=policy_id,
+        )
+    prepared = prepare_reference_track(
+        reference_policy=reference_policy,
+        differential_outputs=differential_outputs,
+        evidence_payload=evidence_payload,
     )
+    return prepared.private_input
 
 
 def decision_for_policy(
@@ -47,18 +46,14 @@ def decision_for_policy(
     expected_attestation: dict[str, Any],
 ) -> Literal["pass", "fail"]:
     """Evaluate compliance decision using policy manifest and verify status."""
-    if not verified:
+    differential_outputs = _DEFAULT_DIFFERENTIAL_OUTPUTS.get(policy_id)
+    if differential_outputs is None:
         return "fail"
-
-    pass_signal_value = str(expected_attestation.get("pass_signal_value", "1"))
-    signal_index = int(expected_attestation.get("decision_signal_index", 0))
-
-    if signal_index < 0 or signal_index >= len(public_signals):
-        return "fail"
-
-    signal_value = str(public_signals[signal_index])
-    if signal_value == pass_signal_value:
-        return "pass"
-    if policy_id == "lending_risk_v1":
-        return "pass" if signal_value in {"1", "true", "True"} else "fail"
-    return "fail"
+    circuit_result = evaluate_circuit_track(
+        policy_id=policy_id,
+        expected_attestation=expected_attestation,
+        differential_outputs=differential_outputs,
+        public_signals=public_signals,
+        verified=verified,
+    )
+    return circuit_result.decision

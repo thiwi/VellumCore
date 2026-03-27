@@ -20,8 +20,8 @@ from vellum_core.http_legacy import mark_legacy_api
 from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
 from vellum_core.metrics import prometheus_payload
 from vellum_core.observability import configure_logging, init_telemetry
-from vellum_core.policy_registry import PolicyNotFoundError
-from vellum_core.policy_runtime import private_input_for_policy
+from vellum_core.policies.dual_track import prepare_reference_track
+from vellum_core.policy_registry import PolicyManifestError, PolicyNotFoundError
 from vellum_core.proof_store import VellumAuditStore
 from vellum_core.runtime import build_framework_client
 from vellum_core.security import (
@@ -161,6 +161,13 @@ def _load_policy_manifest(policy_id: str) -> Any:
             code="unknown_policy",
             message="Policy id not found",
             details={"policy_id": policy_id},
+        ) from exc
+    except PolicyManifestError as exc:
+        raise APIError(
+            status_code=422,
+            code="policy_manifest_invalid",
+            message="Policy manifest failed validation",
+            details={"policy_id": policy_id, "reason": str(exc)},
         ) from exc
 
 
@@ -449,8 +456,9 @@ async def create_policy_run(
     )
 
     try:
-        private_input = private_input_for_policy(
-            policy_id=payload.policy_id,
+        reference_result = prepare_reference_track(
+            reference_policy=policy_manifest.reference_policy,
+            differential_outputs=policy_manifest.differential_outputs,
             evidence_payload=evidence_payload,
         )
     except FrameworkError as exc:
@@ -475,7 +483,11 @@ async def create_policy_run(
         vault_client=vault_client,
         key_name=settings.vellum_data_key,
         request_payload=request_payload,
-        private_input=private_input,
+        private_input=reference_result.private_input,
+        dual_track_reference={
+            "decision": reference_result.decision,
+            "outputs": reference_result.outputs,
+        },
     )
 
     await _persist_and_enqueue_job(
