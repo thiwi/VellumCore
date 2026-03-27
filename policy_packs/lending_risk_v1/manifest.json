@@ -12,6 +12,25 @@
     "type": "json",
     "schema_hint": "Use balances/limits arrays or private_input for pre-normalized circuit payloads."
   },
+  "reference_policy": "lending_risk_reference_v1",
+  "primitives": [
+    "SafeSub",
+    "InterestRateValidator",
+    "MerkleProof",
+    "BalanceGreaterThanLimit",
+    "ActiveCountBounds",
+    "ZeroPaddingInvariant"
+  ],
+  "differential_outputs": {
+    "all_valid": {
+      "signal_index": 0,
+      "value_type": "bool"
+    },
+    "active_count_out": {
+      "signal_index": 1,
+      "value_type": "int"
+    }
+  },
   "expected_attestation": {
     "decision_signal_index": 0,
     "pass_signal_value": "1"

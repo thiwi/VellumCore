@@ -19,7 +19,11 @@ from vellum_core.database import Database
 from vellum_core.logic.batcher import batch_prepare_from_private_input
 from vellum_core.metrics import observe_proof_duration
 from vellum_core.observability import configure_logging, init_telemetry
-from vellum_core.policy_runtime import decision_for_policy
+from vellum_core.policies.dual_track import (
+    DualTrackReferenceResult,
+    assert_dual_track_consistency,
+    evaluate_circuit_track,
+)
 from vellum_core.proof_store import VellumAuditStore
 from vellum_core.runtime import build_framework_client
 from vellum_core.security import SecurityEventLogger, unseal_job_payload
@@ -143,18 +147,39 @@ async def _process_proof_job_async(proof_id: str) -> None:
             try:
                 policy_manifest = framework.policy_registry.get_manifest(policy_id)
                 policy_version = policy_manifest.policy_version
-                decision = decision_for_policy(
+                dual_track_reference_raw = decrypted.get("dual_track_reference")
+                if not isinstance(dual_track_reference_raw, dict):
+                    raise ValueError("Missing dual_track_reference for policy run")
+                reference_decision = dual_track_reference_raw.get("decision")
+                reference_outputs = dual_track_reference_raw.get("outputs")
+                if reference_decision not in {"pass", "fail"}:
+                    raise ValueError("dual_track_reference.decision must be pass|fail")
+                if not isinstance(reference_outputs, dict):
+                    raise ValueError("dual_track_reference.outputs must be an object")
+                reference_result = DualTrackReferenceResult(
+                    private_input={},
+                    decision=reference_decision,
+                    outputs=reference_outputs,
+                )
+                circuit_result = evaluate_circuit_track(
                     policy_id=policy_id,
+                    expected_attestation=policy_manifest.expected_attestation,
+                    differential_outputs=policy_manifest.differential_outputs,
                     public_signals=result.public_signals,
                     verified=verify_result.valid,
-                    expected_attestation=policy_manifest.expected_attestation,
                 )
+                assert_dual_track_consistency(
+                    policy_id=policy_id,
+                    reference=reference_result,
+                    circuit=circuit_result,
+                )
+                decision = circuit_result.decision
             except Exception as exc:
-                decision = "fail"
                 logger.warning(
-                    "policy_decision_failed",
+                    "policy_dual_track_failed",
                     extra={"proof_id": proof_id, "policy_id": policy_id, "reason": str(exc)},
                 )
+                raise
             metadata_patch = {
                 "policy_version": policy_version,
                 "decision": decision,

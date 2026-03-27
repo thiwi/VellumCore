@@ -98,7 +98,17 @@ def test_v5_policy_run_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         prover_service.framework.policy_registry,
         "get_manifest",
-        lambda _policy_id: SimpleNamespace(circuit_id="batch_credit_check", policy_version="1.0.0"),
+        lambda _policy_id: SimpleNamespace(
+            circuit_id="batch_credit_check",
+            policy_version="1.0.0",
+            reference_policy="lending_risk_reference_v1",
+            primitives=["SafeSub"],
+            differential_outputs={
+                "all_valid": SimpleNamespace(signal_index=0, value_type="bool"),
+                "active_count_out": SimpleNamespace(signal_index=1, value_type="int"),
+            },
+            expected_attestation={"decision_signal_index": 0, "pass_signal_value": "1"},
+        ),
     )
     monkeypatch.setattr(prover_service.framework.evidence_store, "put", fake_evidence_put)
     monkeypatch.setattr(prover_service, "seal_job_payload", fake_seal_job_payload)
@@ -176,7 +186,17 @@ def test_v5_policy_run_submit_with_evidence_ref(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         prover_service.framework.policy_registry,
         "get_manifest",
-        lambda _policy_id: SimpleNamespace(circuit_id="batch_credit_check", policy_version="1.0.1"),
+        lambda _policy_id: SimpleNamespace(
+            circuit_id="batch_credit_check",
+            policy_version="1.0.1",
+            reference_policy="lending_risk_reference_v1",
+            primitives=["SafeSub"],
+            differential_outputs={
+                "all_valid": SimpleNamespace(signal_index=0, value_type="bool"),
+                "active_count_out": SimpleNamespace(signal_index=1, value_type="int"),
+            },
+            expected_attestation={"decision_signal_index": 0, "pass_signal_value": "1"},
+        ),
     )
     monkeypatch.setattr(prover_service.framework.evidence_store, "get", fake_evidence_get)
     monkeypatch.setattr(prover_service.framework.evidence_store, "put", fail_evidence_put)

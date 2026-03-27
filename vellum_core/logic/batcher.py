@@ -101,7 +101,7 @@ def _assert_zero_tail(values: list[int], active_count: int) -> None:
 def _validate_u32_list(field_name: str, values: list[int]) -> None:
     """Ensure all values are integers inside Circom-friendly uint32 range."""
     for idx, value in enumerate(values):
-        if not isinstance(value, int):
+        if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{field_name}[{idx}] must be an integer")
         if value < 0 or value > MAX_UINT32:
             raise ValueError(

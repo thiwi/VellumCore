@@ -15,7 +15,11 @@ from vellum_core.api.types import (
     ProofGenerationRequest,
     VerificationRequest,
 )
-from vellum_core.policy_runtime import decision_for_policy, private_input_for_policy
+from vellum_core.policies.dual_track import (
+    assert_dual_track_consistency,
+    evaluate_circuit_track,
+    prepare_reference_track,
+)
 from vellum_core.policy_registry import PolicyNotFoundError, PolicyRegistry
 from vellum_core.spi import EvidenceStore
 
@@ -51,8 +55,9 @@ class PolicyEngine:
         attestation_id = f"att-{run_id}"
         evidence_payload, evidence_ref = await self._resolve_evidence(run_id=run_id, request=request)
 
-        private_input = private_input_for_policy(
-            policy_id=request.policy_id,
+        reference_result = prepare_reference_track(
+            reference_policy=manifest.reference_policy,
+            differential_outputs=manifest.differential_outputs,
             evidence_payload=evidence_payload,
         )
 
@@ -60,7 +65,7 @@ class PolicyEngine:
         generated = await self.proof_engine.generate(
             ProofGenerationRequest(
                 circuit_id=manifest.circuit_id,
-                private_input=private_input,
+                private_input=reference_result.private_input,
             )
         )
         generation_ms = (time.perf_counter() - started) * 1000.0
@@ -75,12 +80,19 @@ class PolicyEngine:
         )
         verify_ms = (time.perf_counter() - verify_started) * 1000.0
 
-        decision = decision_for_policy(
+        circuit_result = evaluate_circuit_track(
             policy_id=request.policy_id,
+            expected_attestation=manifest.expected_attestation,
+            differential_outputs=manifest.differential_outputs,
             public_signals=generated.public_signals,
             verified=verified.valid,
-            expected_attestation=manifest.expected_attestation,
         )
+        assert_dual_track_consistency(
+            policy_id=request.policy_id,
+            reference=reference_result,
+            circuit=circuit_result,
+        )
+        decision = circuit_result.decision
 
         await self.attestation_service.create(
             attestation_id=attestation_id,
@@ -94,6 +106,10 @@ class PolicyEngine:
             metadata={
                 "context": request.context,
                 "evidence_ref": evidence_ref,
+                "dual_track": {
+                    "reference_outputs": reference_result.outputs,
+                    "circuit_outputs": circuit_result.outputs,
+                },
             },
         )
 
