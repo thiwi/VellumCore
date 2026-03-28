@@ -1,0 +1,51 @@
+FROM rust:1.85-bullseye AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app/native_prover
+COPY native_prover/Cargo.toml native_prover/build.rs ./
+COPY proto ../proto
+COPY native_prover/src ./src
+RUN cargo clean
+RUN cargo build --release
+
+FROM node:bullseye-slim AS node-tools
+RUN npm install -g snarkjs@0.7.5
+
+FROM debian:trixie-slim AS runtime
+ARG RAPIDSNARK_DOWNLOAD_URL=""
+ARG WITNESSCALC_DOWNLOAD_URL=""
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libatomic1 \
+    unzip \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/snarkjs/build/cli.cjs /usr/local/bin/snarkjs \
+    && chmod +x /usr/local/lib/node_modules/snarkjs/build/cli.cjs
+RUN if [ -n "$RAPIDSNARK_DOWNLOAD_URL" ]; then \
+      tmp_dir="$(mktemp -d)" && \
+      curl -fsSL "$RAPIDSNARK_DOWNLOAD_URL" -o "$tmp_dir/rapidsnark.asset" && \
+      case "$RAPIDSNARK_DOWNLOAD_URL" in \
+        *.zip) \
+          unzip -q "$tmp_dir/rapidsnark.asset" -d "$tmp_dir/unpack" && \
+          cp "$tmp_dir"/unpack/*/bin/prover /usr/local/bin/rapidsnark \
+          ;; \
+        *) \
+          cp "$tmp_dir/rapidsnark.asset" /usr/local/bin/rapidsnark \
+          ;; \
+      esac && \
+      chmod +x /usr/local/bin/rapidsnark && \
+      rm -rf "$tmp_dir"; \
+    fi
+RUN if [ -n "$WITNESSCALC_DOWNLOAD_URL" ]; then \
+      curl -fsSL "$WITNESSCALC_DOWNLOAD_URL" -o /usr/local/bin/witnesscalc && \
+      chmod +x /usr/local/bin/witnesscalc; \
+    fi
+COPY --from=builder /app/native_prover/target/release/vellum-native-prover /usr/local/bin/vellum-native-prover
+EXPOSE 50051
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["vellum-native-prover", "--addr", "0.0.0.0:50051"]

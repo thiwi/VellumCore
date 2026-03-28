@@ -57,6 +57,20 @@ Loaded by `Settings.from_env()` in `vellum_core/config.py`.
 - `WORKER_METRICS_HOST`
 - `WORKER_METRICS_PORT`
 - `NATIVE_VERIFY_BASELINE_SECONDS`
+- `PROOF_PROVIDER_MODE` (`snarkjs` or `grpc`; default: `snarkjs`)
+- `GRPC_PROVER_ENDPOINT` (default: `127.0.0.1:50051`)
+- `GRPC_PROVER_TIMEOUT_SECONDS` (default: `30`)
+- `PROOF_SHADOW_MODE` (`true`/`false`; default: `false`)
+- `PROOF_SHADOW_PROVIDER_MODE` (`snarkjs` or `grpc`; default: `grpc`)
+- `PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS` (`true`/`false`; default: `true`)
+- `GRPC_CUTOVER_GATE_ENFORCED` (`true`/`false`; default: `false`)
+- `GRPC_CUTOVER_GATE_REPORT_PATH` (required when `GRPC_CUTOVER_GATE_ENFORCED=true` and provider mode is `grpc`)
+- `NATIVE_GENERATE_BACKEND` (`snarkjs` or `rapidsnark`; native-prover service, default: `snarkjs`)
+- `NATIVE_WITNESS_BACKEND` (`snarkjs` or `binary`; native-prover service, default: `snarkjs`)
+- `WITNESS_GEN_BIN` (native-prover service witness binary, default: `witnesscalc`)
+- `RAPIDSNARK_BIN` (native-prover service prove binary, default: `rapidsnark`)
+- `GATE_GRPC_MODE` (`snarkjs`, `rapidsnark`, or `auto`; benchmark script gate-source selection, default: `snarkjs`)
+- `SHADOW_NATIVE_GENERATE_BACKEND` (`snarkjs` or `rapidsnark`; benchmark script shadow-mode native generate backend, default: `snarkjs` or auto-`rapidsnark` when `ENABLE_RAPIDSNARK=1` and `GATE_GRPC_MODE!=snarkjs`)
 
 ### Observability / Logging
 

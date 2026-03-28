@@ -81,6 +81,103 @@ python -m pytest -m security
 RUN_E2E=1 python -m pytest -m "e2e and critical"
 ```
 
+## Policy Compiler (Single Source)
+
+`lending_risk_v1` now ships with a canonical DSL source:
+
+- [`policy_packs/lending_risk_v1/policy_spec.yaml`](policy_packs/lending_risk_v1/policy_spec.yaml)
+- [`policy_packs/lending_risk_portfolio_v1/policy_spec.yaml`](policy_packs/lending_risk_portfolio_v1/policy_spec.yaml)
+
+Generate artifacts from DSL:
+
+```bash
+vellum-compiler validate policy_packs/lending_risk_v1/policy_spec.yaml
+vellum-compiler generate policy_packs/lending_risk_v1/policy_spec.yaml --repo-root .
+vellum-compiler check-drift policy_packs/lending_risk_v1/policy_spec.yaml --repo-root .
+```
+
+`generate` also updates `policy_packs/<policy_id>/manifest.json` compiler metadata (`generated_from_hash`, paths, versions) when a manifest exists next to the spec.
+
+Generated files are committed for auditability:
+
+- `vellum_core/policies/generated/lending_risk_reference_v1.py`
+- `policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.circom`
+
+## Native gRPC Prover (Optional)
+
+Vellum runtime supports two proof backends:
+
+- `snarkjs` (default)
+- `grpc` (Rust native prover service)
+
+Runtime knobs:
+
+- `PROOF_PROVIDER_MODE=snarkjs|grpc`
+- `GRPC_PROVER_ENDPOINT=host:port`
+- `PROOF_SHADOW_MODE=true|false`
+- `PROOF_SHADOW_PROVIDER_MODE=snarkjs|grpc`
+- `PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS=true|false`
+
+Rust service sources live in [`native_prover/`](native_prover/README.md).
+Current phase keeps Circom compatibility with split backend:
+- generate via `snarkjs` (or optional `rapidsnark` path inside native-prover)
+- verify via native Rust `arkworks` (BN254/Groth16)
+
+Cutover gate evaluation:
+
+```bash
+vellum-cutover-gate --summary-json path/to/cutover_summary.json
+```
+
+Provider benchmark runner (snarkjs vs grpc, same payload):
+
+```bash
+RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
+  ./systematic_study/run_provider_benchmark.sh
+```
+
+Shadow-assisted gate evaluation (auto derives compared runs + mismatches):
+
+```bash
+RUNS=40 SHADOW_RUNS=1200 DAYS_OBSERVED=7 \
+  ./systematic_study/run_provider_benchmark.sh
+```
+
+To run shadow in the same native generate mode as grpc cutover benchmarking:
+
+```bash
+ENABLE_RAPIDSNARK=1 GATE_GRPC_MODE=rapidsnark \
+SHADOW_NATIVE_GENERATE_BACKEND=rapidsnark RAPIDSNARK_DOWNLOAD_URL=<binary-url> \
+RUNS=40 SHADOW_RUNS=1200 DAYS_OBSERVED=7 \
+  ./systematic_study/run_provider_benchmark.sh
+```
+
+Optional additional benchmark mode with `rapidsnark` generate backend:
+
+```bash
+ENABLE_RAPIDSNARK=1 RAPIDSNARK_DOWNLOAD_URL=<binary-url> \
+RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
+  ./systematic_study/run_provider_benchmark.sh
+```
+
+Use `rapidsnark` benchmark as grpc gate source:
+
+```bash
+ENABLE_RAPIDSNARK=1 GATE_GRPC_MODE=rapidsnark RAPIDSNARK_DOWNLOAD_URL=<binary-url> \
+RUNS=40 SHADOW_RUNS=1200 DAYS_OBSERVED=7 \
+  ./systematic_study/run_provider_benchmark.sh
+```
+
+Optional witness backend override for the `rapidsnark` path:
+
+```bash
+ENABLE_RAPIDSNARK=1 RAPIDSNARK_DOWNLOAD_URL=<binary-url> \
+NATIVE_WITNESS_BACKEND=binary WITNESS_GEN_BIN=/usr/local/bin/witnesscalc \
+WITNESSCALC_DOWNLOAD_URL=<witnesscalc-url> \
+RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
+  ./systematic_study/run_provider_benchmark.sh
+```
+
 ## OSS Governance
 
 - License: Apache-2.0 (`LICENSE`)

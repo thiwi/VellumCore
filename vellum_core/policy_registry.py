@@ -43,6 +43,7 @@ class PolicyPackManifest(BaseModel):
     reference_policy: str = Field(min_length=1)
     primitives: list[str] = Field(min_length=1)
     differential_outputs: dict[str, DifferentialOutputSpec] = Field(min_length=1)
+    compiler_metadata: dict[str, str] = Field(default_factory=dict)
     expected_attestation: dict[str, Any] = Field(default_factory=dict)
 
 

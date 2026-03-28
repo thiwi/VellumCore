@@ -11,6 +11,7 @@ venv/
 build/
 dist/
 *.egg-info/
+native_prover/target/
 shared_assets/*
 !shared_assets/.gitkeep
 shared_store/*

@@ -70,3 +70,99 @@ template MerkleInclusionPoseidonDepth10() {
     valid <== 1;
 }
 
+// Enforces 0 < active_count <= N for batch-style policies.
+template ActiveCountBounds(N) {
+    signal input active_count;
+    signal output valid;
+
+    component gt = GreaterThan(16);
+    component lt = LessThan(16);
+
+    gt.in[0] <== active_count;
+    gt.in[1] <== 0;
+
+    lt.in[0] <== active_count;
+    lt.in[1] <== N + 1;
+
+    valid <== gt.out * lt.out;
+    valid === 1;
+}
+
+// Produces 1 iff index < active_count.
+template ActiveIndexFlag16() {
+    signal input active_count;
+    signal input index;
+    signal output is_active;
+
+    component gt = GreaterThan(16);
+    gt.in[0] <== active_count;
+    gt.in[1] <== index;
+    is_active <== gt.out;
+    is_active * (is_active - 1) === 0;
+}
+
+template PrimitiveLessThan32() {
+    signal input lhs;
+    signal input rhs;
+    signal output out;
+
+    component cmp = LessThan(32);
+    cmp.in[0] <== lhs;
+    cmp.in[1] <== rhs;
+    out <== cmp.out;
+}
+
+template PrimitiveGreaterThan32() {
+    signal input lhs;
+    signal input rhs;
+    signal output out;
+
+    component cmp = GreaterThan(32);
+    cmp.in[0] <== lhs;
+    cmp.in[1] <== rhs;
+    out <== cmp.out;
+}
+
+template PrimitiveLessEqThan32() {
+    signal input lhs;
+    signal input rhs;
+    signal output out;
+
+    component cmp = LessEqThan(32);
+    cmp.in[0] <== lhs;
+    cmp.in[1] <== rhs;
+    out <== cmp.out;
+}
+
+template PrimitiveGreaterEqThan32() {
+    signal input lhs;
+    signal input rhs;
+    signal output out;
+
+    component cmp = GreaterEqThan(32);
+    cmp.in[0] <== lhs;
+    cmp.in[1] <== rhs;
+    out <== cmp.out;
+}
+
+template PrimitiveEqual() {
+    signal input lhs;
+    signal input rhs;
+    signal output out;
+
+    component cmp = IsEqual();
+    cmp.in[0] <== lhs;
+    cmp.in[1] <== rhs;
+    out <== cmp.out;
+}
+
+// Enforces deterministic zero rows for inactive batch entries.
+template ZeroPaddingInvariant() {
+    signal input value;
+    signal input is_active;
+    signal output valid;
+
+    is_active * (is_active - 1) === 0;
+    value * (1 - is_active) === 0;
+    valid <== 1;
+}

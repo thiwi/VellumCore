@@ -23,7 +23,8 @@ The framework is provider-oriented and circuit-manifest-driven. Circuits are dis
 - **Worker (Celery)**
   - fetches queued jobs
   - normalizes/validates inputs
-  - generates proofs with provider (`SnarkJSProvider`)
+  - generates proofs with configured provider (`SnarkJSProvider` or `GrpcProofProvider`)
+  - optional shadow-compare mode (`ShadowProofProvider`) for backend migration
   - persists outputs and audit events
 - **Verifier API (FastAPI)**
   - verifies submitted proof/public signals
@@ -80,7 +81,9 @@ Quality gates:
 - `vellum_core.spi`: extension protocols (provider, artifact store, signer, job backend)
 - `vellum_core.spi`: plus `EvidenceStore` and `AttestationSigner`
 - `vellum_core.runtime`: default runtime wiring
-- `vellum_core.providers`: proof provider implementations (SnarkJS)
+- `vellum_core.providers`: proof provider implementations (`snarkjs`, `grpc`, shadow wrapper)
+- `vellum_core.policy_compiler`: YAML DSL compiler (`policy_spec.yaml -> Python + Circom`)
+- `vellum_core.cutover_gate`: deterministic gate logic for grpc cutover readiness
 - `vellum_core.registry`: circuit discovery + artifact path resolution
 - `vellum_core.logic.batcher`: batch pre-processing invariants
 - `vellum_core.auth`: JWT and bank-handshake validation
@@ -89,5 +92,6 @@ Quality gates:
 ## Design Constraints
 
 - Circuit IDs are runtime-selectable, but direct batch helpers are intentionally scoped to `batch_credit_check`.
+- Policy source-of-truth can be DSL-driven (`policy_spec.yaml`) with committed generated artifacts.
 - Public API compatibility guarantees apply to `vellum_core.api` and `vellum_core.spi` only.
 - Reference service HTTP endpoints are best-effort stable and may evolve faster.

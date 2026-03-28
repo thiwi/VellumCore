@@ -33,7 +33,13 @@ def _write_manifest(circuits_dir: Path, *, circuit_id: str) -> None:
     (circuit_dir / f"{circuit_id}.circom").write_text("component main {}", encoding="utf-8")
 
 
-def _make_settings(tmp_path: Path) -> Settings:
+def _make_settings(
+    tmp_path: Path,
+    *,
+    proof_provider_mode: str = "snarkjs",
+    proof_shadow_mode: bool = False,
+    proof_shadow_provider_mode: str = "grpc",
+) -> Settings:
     return Settings(
         app_name="vellum-core",
         circuits_dir=tmp_path / "circuits",
@@ -67,6 +73,12 @@ def _make_settings(tmp_path: Path) -> Settings:
         worker_metrics_host="127.0.0.1",
         worker_metrics_port=9108,
         native_verify_baseline_seconds=0.000005,
+        proof_provider_mode=proof_provider_mode,
+        grpc_prover_endpoint="127.0.0.1:50051",
+        grpc_prover_timeout_seconds=30.0,
+        proof_shadow_mode=proof_shadow_mode,
+        proof_shadow_provider_mode=proof_shadow_provider_mode,
+        proof_shadow_compare_public_signals=True,
     )
 
 
@@ -150,6 +162,29 @@ def test_build_framework_client_wires_dependencies(tmp_path: Path) -> None:
     assert isinstance(client.evidence_store, defaults.FilesystemEvidenceStore)
     assert isinstance(client.attestation_signer, defaults.VaultAttestationSigner)
     assert isinstance(client.job_backend, defaults.CeleryJobBackend)
+
+
+def test_build_provider_uses_grpc_mode(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path, proof_provider_mode="grpc")
+    _write_manifest(settings.circuits_dir, circuit_id="batch_credit_check")
+    registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
+    provider = defaults._build_provider(settings=settings, registry=registry)
+    assert isinstance(provider, defaults.GrpcProofProvider)
+
+
+def test_build_provider_wraps_shadow_mode(tmp_path: Path) -> None:
+    settings = _make_settings(
+        tmp_path,
+        proof_provider_mode="snarkjs",
+        proof_shadow_mode=True,
+        proof_shadow_provider_mode="grpc",
+    )
+    _write_manifest(settings.circuits_dir, circuit_id="batch_credit_check")
+    registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
+    provider = defaults._build_provider(settings=settings, registry=registry)
+    assert isinstance(provider, defaults.ShadowProofProvider)
+    assert isinstance(provider.primary, defaults.SnarkJSProvider)
+    assert isinstance(provider.shadow, defaults.GrpcProofProvider)
 
 
 def test_celery_app_module_builds_queue(monkeypatch: pytest.MonkeyPatch) -> None:

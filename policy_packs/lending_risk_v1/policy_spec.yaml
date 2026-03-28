@@ -1,0 +1,52 @@
+policy_id: lending_risk_v1
+policy_version: "1.0.0"
+reference_policy: lending_risk_reference_v1
+spec_version: "1.0.0"
+compiler_version: "0.1.0"
+description: Batch lending risk control proving all active balances exceed limits.
+
+batch:
+  batch_size: 250
+
+inputs:
+  balances:
+    kind: uint32_array
+  limits:
+    kind: uint32_array
+
+decision:
+  kind: all
+  inner:
+    kind: comparison
+    comparison:
+      op: ">"
+      left:
+        ref: balances
+      right:
+        ref: limits
+
+outputs:
+  all_valid:
+    expr: decision
+    value_type: bool
+    signal_index: 0
+  active_count_out:
+    expr: active_count
+    value_type: int
+    signal_index: 1
+
+primitives:
+  - SafeSub
+  - InterestRateValidator
+  - MerkleProof
+  - BalanceGreaterThanLimit
+  - ActiveCountBounds
+  - ZeroPaddingInvariant
+
+expected_attestation:
+  decision_signal_index: 0
+  pass_signal_value: "1"
+
+generated_python_path: vellum_core/policies/generated/lending_risk_reference_v1.py
+generated_circom_path: policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.circom
+circuit_id: batch_credit_check

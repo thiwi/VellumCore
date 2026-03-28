@@ -17,7 +17,12 @@ from vellum_core.api import (
 )
 from vellum_core.config import Settings
 from vellum_core.policy_registry import PolicyRegistry
-from vellum_core.providers import SnarkJSProvider
+from vellum_core.providers import (
+    GrpcProofProvider,
+    ShadowProofProvider,
+    SnarkJSProvider,
+    ZKProvider,
+)
 from vellum_core.registry import CircuitRegistry
 from vellum_core.spi import (
     ArtifactPathsView,
@@ -119,7 +124,7 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
     """Build the default production-style framework composition."""
     registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
     artifact_store = FilesystemArtifactStore(registry)
-    provider = SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
+    provider = _build_provider(settings=settings, registry=registry)
     circuit_manager = CircuitManager(registry=registry, artifact_store=artifact_store)
     proof_engine = ProofEngine(provider=provider, circuit_manager=circuit_manager)
     policy_registry = PolicyRegistry(settings.policy_packs_dir)
@@ -159,3 +164,41 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
         attestation_signer=attestation_signer,
         job_backend=CeleryJobBackend(),
     )
+
+
+def _build_provider(*, settings: Settings, registry: CircuitRegistry) -> ZKProvider:
+    """Build primary provider and optional shadow wrapper from settings."""
+    primary = _build_provider_for_mode(
+        mode=settings.proof_provider_mode,
+        settings=settings,
+        registry=registry,
+    )
+    if not settings.proof_shadow_mode:
+        return primary
+    shadow = _build_provider_for_mode(
+        mode=settings.proof_shadow_provider_mode,
+        settings=settings,
+        registry=registry,
+    )
+    return ShadowProofProvider(
+        primary=primary,
+        shadow=shadow,
+        compare_public_signals=settings.proof_shadow_compare_public_signals,
+    )
+
+
+def _build_provider_for_mode(
+    *,
+    mode: str,
+    settings: Settings,
+    registry: CircuitRegistry,
+) -> ZKProvider:
+    if mode == "snarkjs":
+        return SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
+    if mode == "grpc":
+        return GrpcProofProvider(
+            registry=registry,
+            endpoint=settings.grpc_prover_endpoint,
+            timeout_seconds=settings.grpc_prover_timeout_seconds,
+        )
+    raise ValueError(f"unsupported proof provider mode: {mode}")

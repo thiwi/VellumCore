@@ -1,0 +1,25 @@
+[package]
+name = "vellum-native-prover"
+version = "0.1.0"
+edition = "2021"
+description = "Native gRPC prover service for VellumCore"
+license = "Apache-2.0"
+
+[dependencies]
+ark-bn254 = "0.4.0"
+ark-ec = "0.4.2"
+ark-ff = "0.4.2"
+ark-groth16 = "0.4.0"
+ark-snark = "0.4.0"
+clap = { version = "4.5.9", features = ["derive", "env"] }
+prost = "0.12.6"
+serde_json = "1.0.140"
+tempfile = "3.12.0"
+thiserror = "1.0.63"
+tokio = { version = "1.40.0", features = ["fs", "macros", "process", "rt-multi-thread"] }
+tonic = { version = "0.11.0", features = ["transport"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+
+[build-dependencies]
+tonic-build = "0.11.0"

@@ -28,6 +28,12 @@ vellum_security_events_total = Counter(
     labelnames=("event_type", "outcome"),
 )
 
+vellum_proof_shadow_events_total = Counter(
+    "vellum_proof_shadow_events_total",
+    "Shadow-mode proof backend comparison events.",
+    labelnames=("event_type", "outcome"),
+)
+
 _METRIC_LOCK = Lock()
 _verify_total_seconds = 0.0
 _verify_count = 0
@@ -59,6 +65,11 @@ def set_native_baseline(seconds: float) -> None:
 def observe_security_event(event_type: str, outcome: str) -> None:
     """Increment labeled counter for one security event."""
     vellum_security_events_total.labels(event_type=event_type, outcome=outcome).inc()
+
+
+def observe_shadow_event(event_type: str, outcome: str) -> None:
+    """Increment labeled counter for one shadow-mode provider comparison event."""
+    vellum_proof_shadow_events_total.labels(event_type=event_type, outcome=outcome).inc()
 
 
 def trust_speed_snapshot() -> dict[str, float | None]:

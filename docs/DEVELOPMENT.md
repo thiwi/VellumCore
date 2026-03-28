@@ -17,6 +17,8 @@ pip install -e .[dev]
 ```bash
 vellum circuits list
 vellum circuits validate --json
+vellum-compiler validate policy_packs/lending_risk_v1/policy_spec.yaml
+vellum-compiler check-drift policy_packs/lending_risk_v1/policy_spec.yaml --repo-root .
 ```
 
 ## Test Strategy
@@ -47,6 +49,20 @@ Static checks:
 ```bash
 ruff check .
 mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+```
+
+Native prover (optional local run):
+
+```bash
+cd native_prover
+cargo run --release -- --addr 0.0.0.0:50051 --snarkjs-bin snarkjs
+```
+
+Provider benchmark + cutover gate (manual/local):
+
+```bash
+RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
+  ./systematic_study/run_provider_benchmark.sh
 ```
 
 ## Coding Standards

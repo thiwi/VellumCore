@@ -1,0 +1,88 @@
+name: Provider Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Policy runs per provider mode"
+        required: true
+        default: "40"
+      days_observed:
+        description: "Shadow days observed (for gate eval)"
+        required: true
+        default: "0"
+      compared_runs:
+        description: "Shadow compared runs (for gate eval when shadow_runs=0)"
+        required: true
+        default: "0"
+      functional_mismatches:
+        description: "Shadow mismatches (for gate eval when shadow_runs=0)"
+        required: true
+        default: "0"
+      shadow_runs:
+        description: "If >0, execute shadow mode and derive compared_runs/mismatches from worker metrics"
+        required: true
+        default: "0"
+      enable_rapidsnark:
+        description: "Also run grpc benchmark with rapidsnark generate backend (0/1)"
+        required: true
+        default: "0"
+      gate_grpc_mode:
+        description: "Benchmark file used for grpc cutover gate (snarkjs|rapidsnark|auto)"
+        required: true
+        default: "snarkjs"
+      shadow_native_generate_backend:
+        description: "Shadow run native generate backend override (snarkjs|rapidsnark; empty=auto)"
+        required: false
+        default: ""
+      rapidsnark_download_url:
+        description: "Optional URL for rapidsnark binary download during native-prover image build"
+        required: false
+        default: ""
+      native_witness_backend:
+        description: "Witness backend for rapidsnark mode (snarkjs|binary)"
+        required: true
+        default: "snarkjs"
+      witness_gen_bin:
+        description: "Witness generator binary name/path when native_witness_backend=binary"
+        required: false
+        default: "witnesscalc"
+      witnesscalc_download_url:
+        description: "Optional URL for witnesscalc binary download during native-prover image build"
+        required: false
+        default: ""
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Run provider benchmark + gate evaluation
+        env:
+          RUNS: ${{ github.event.inputs.runs }}
+          DAYS_OBSERVED: ${{ github.event.inputs.days_observed }}
+          COMPARED_RUNS: ${{ github.event.inputs.compared_runs }}
+          FUNCTIONAL_MISMATCHES: ${{ github.event.inputs.functional_mismatches }}
+          SHADOW_RUNS: ${{ github.event.inputs.shadow_runs }}
+          ENABLE_RAPIDSNARK: ${{ github.event.inputs.enable_rapidsnark }}
+          GATE_GRPC_MODE: ${{ github.event.inputs.gate_grpc_mode }}
+          SHADOW_NATIVE_GENERATE_BACKEND: ${{ github.event.inputs.shadow_native_generate_backend }}
+          RAPIDSNARK_DOWNLOAD_URL: ${{ github.event.inputs.rapidsnark_download_url }}
+          NATIVE_WITNESS_BACKEND: ${{ github.event.inputs.native_witness_backend }}
+          WITNESS_GEN_BIN: ${{ github.event.inputs.witness_gen_bin }}
+          WITNESSCALC_DOWNLOAD_URL: ${{ github.event.inputs.witnesscalc_download_url }}
+        run: |
+          ./systematic_study/run_provider_benchmark.sh
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-cutover-benchmark
+          path: systematic_study/reports/provider_cutover/*.json

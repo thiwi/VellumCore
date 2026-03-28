@@ -1,0 +1,48 @@
+{
+  "policy_id": "lending_risk_portfolio_v1",
+  "policy_version": "1.0.0",
+  "circuit_id": "batch_credit_check",
+  "description": "Portfolio lending risk control that proves all active balances exceed limits.",
+  "input_contract": {
+    "mode": "balances_limits_or_private_input",
+    "required_fields": [
+      "balances",
+      "limits"
+    ],
+    "max_batch": 250
+  },
+  "evidence_contract": {
+    "type": "json",
+    "schema_hint": "Use balances/limits arrays or private_input for pre-normalized circuit payloads."
+  },
+  "reference_policy": "lending_risk_portfolio_reference_v1",
+  "primitives": [
+    "SafeSub",
+    "InterestRateValidator",
+    "MerkleProof",
+    "BalanceGreaterThanLimit",
+    "ActiveCountBounds",
+    "ZeroPaddingInvariant"
+  ],
+  "differential_outputs": {
+    "all_valid": {
+      "signal_index": 0,
+      "value_type": "bool"
+    },
+    "active_count_out": {
+      "signal_index": 1,
+      "value_type": "int"
+    }
+  },
+  "compiler_metadata": {
+    "spec_version": "1.0.0",
+    "compiler_version": "0.1.0",
+    "generated_from_hash": "c1e1b912af71d94f57b284ccd25ac9452425630f69ecba1d7e066f14c58ccba5",
+    "generated_python_path": "vellum_core/policies/generated/lending_risk_portfolio_reference_v1.py",
+    "generated_circom_path": "policy_packs/lending_risk_portfolio_v1/generated/lending_risk_portfolio_v1.generated.circom"
+  },
+  "expected_attestation": {
+    "decision_signal_index": 0,
+    "pass_signal_value": "1"
+  }
+}

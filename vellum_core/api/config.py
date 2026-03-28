@@ -20,6 +20,12 @@ class FrameworkConfig(BaseModel):
     shared_assets_dir: Path
     proof_output_dir: Path
     snarkjs_bin: str
+    proof_provider_mode: str
+    grpc_prover_endpoint: str
+    proof_shadow_mode: bool
+    proof_shadow_provider_mode: str
+    grpc_cutover_gate_enforced: bool
+    grpc_cutover_gate_report_path: str | None
     database_url: str
     celery_queue: str
     native_verify_baseline_seconds: float
@@ -34,6 +40,12 @@ class FrameworkConfig(BaseModel):
             shared_assets_dir=settings.shared_assets_dir,
             proof_output_dir=settings.proof_output_dir,
             snarkjs_bin=settings.snarkjs_bin,
+            proof_provider_mode=settings.proof_provider_mode,
+            grpc_prover_endpoint=settings.grpc_prover_endpoint,
+            proof_shadow_mode=settings.proof_shadow_mode,
+            proof_shadow_provider_mode=settings.proof_shadow_provider_mode,
+            grpc_cutover_gate_enforced=settings.grpc_cutover_gate_enforced,
+            grpc_cutover_gate_report_path=settings.grpc_cutover_gate_report_path,
             database_url=settings.database_url,
             celery_queue=settings.celery_queue,
             native_verify_baseline_seconds=settings.native_verify_baseline_seconds,

@@ -1,0 +1,31 @@
+services:
+  native-prover:
+    build:
+      context: .
+      dockerfile: Dockerfile.native-prover
+      args:
+        RAPIDSNARK_DOWNLOAD_URL: ${RAPIDSNARK_DOWNLOAD_URL:-}
+        WITNESSCALC_DOWNLOAD_URL: ${WITNESSCALC_DOWNLOAD_URL:-}
+    image: vellum/native-prover:dev
+    environment:
+      NATIVE_PROVER_ADDR: 0.0.0.0:50051
+      SNARKJS_BIN: snarkjs
+      NATIVE_GENERATE_BACKEND: ${NATIVE_GENERATE_BACKEND:-snarkjs}
+      RAPIDSNARK_BIN: ${RAPIDSNARK_BIN:-rapidsnark}
+      NATIVE_WITNESS_BACKEND: ${NATIVE_WITNESS_BACKEND:-snarkjs}
+      WITNESS_GEN_BIN: ${WITNESS_GEN_BIN:-witnesscalc}
+    volumes:
+      - shared_assets:/shared_assets
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+
+  prover:
+    depends_on:
+      native-prover:
+        condition: service_started
+
+  worker:
+    depends_on:
+      native-prover:
+        condition: service_started

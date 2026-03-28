@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,14 @@ class Settings:
     worker_metrics_host: str
     worker_metrics_port: int
     native_verify_baseline_seconds: float
+    proof_provider_mode: str = "snarkjs"
+    grpc_prover_endpoint: str = "127.0.0.1:50051"
+    grpc_prover_timeout_seconds: float = 30.0
+    proof_shadow_mode: bool = False
+    proof_shadow_provider_mode: str = "grpc"
+    proof_shadow_compare_public_signals: bool = True
+    grpc_cutover_gate_enforced: bool = False
+    grpc_cutover_gate_report_path: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -116,6 +125,24 @@ class Settings:
             native_verify_baseline_seconds=float(
                 os.getenv("NATIVE_VERIFY_BASELINE_SECONDS", "0.000005")
             ),
+            proof_provider_mode=os.getenv("PROOF_PROVIDER_MODE", "snarkjs").strip().lower(),
+            grpc_prover_endpoint=os.getenv("GRPC_PROVER_ENDPOINT", "127.0.0.1:50051"),
+            grpc_prover_timeout_seconds=float(
+                os.getenv("GRPC_PROVER_TIMEOUT_SECONDS", "30")
+            ),
+            proof_shadow_mode=_parse_bool_env("PROOF_SHADOW_MODE", default=False),
+            proof_shadow_provider_mode=os.getenv(
+                "PROOF_SHADOW_PROVIDER_MODE", "grpc"
+            ).strip().lower(),
+            proof_shadow_compare_public_signals=_parse_bool_env(
+                "PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS",
+                default=True,
+            ),
+            grpc_cutover_gate_enforced=_parse_bool_env(
+                "GRPC_CUTOVER_GATE_ENFORCED",
+                default=False,
+            ),
+            grpc_cutover_gate_report_path=os.getenv("GRPC_CUTOVER_GATE_REPORT_PATH"),
         )
         settings._validate()
         return settings
@@ -123,6 +150,14 @@ class Settings:
     def _validate(self) -> None:
         if self.security_profile not in {"strict", "dev"}:
             raise ValueError("SECURITY_PROFILE must be either 'strict' or 'dev'")
+        if self.proof_provider_mode not in {"snarkjs", "grpc"}:
+            raise ValueError("PROOF_PROVIDER_MODE must be one of: snarkjs, grpc")
+        if self.proof_shadow_provider_mode not in {"snarkjs", "grpc"}:
+            raise ValueError("PROOF_SHADOW_PROVIDER_MODE must be one of: snarkjs, grpc")
+        if self.grpc_prover_timeout_seconds <= 0:
+            raise ValueError("GRPC_PROVER_TIMEOUT_SECONDS must be > 0")
+        if self.proof_provider_mode == "grpc" and self.grpc_cutover_gate_enforced:
+            self._validate_grpc_cutover_gate()
         if not self.vellum_data_key:
             raise ValueError("VELLUM_DATA_KEY is required")
         if self.security_profile != "strict":
@@ -138,6 +173,29 @@ class Settings:
                 "SECURITY_PROFILE=strict requires SUBMIT_RATE_LIMIT_PER_MINUTE >= 1"
             )
 
+    def _validate_grpc_cutover_gate(self) -> None:
+        report_path_raw = (self.grpc_cutover_gate_report_path or "").strip()
+        if not report_path_raw:
+            raise ValueError(
+                "GRPC_CUTOVER_GATE_REPORT_PATH is required when "
+                "GRPC_CUTOVER_GATE_ENFORCED=true and PROOF_PROVIDER_MODE=grpc"
+            )
+        report_path = Path(report_path_raw)
+        if not report_path.exists():
+            raise ValueError(f"GRPC cutover gate report not found: {report_path}")
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(
+                f"GRPC cutover gate report is not valid JSON: {report_path}"
+            ) from exc
+        pass_gate = _extract_cutover_pass_gate(payload)
+        if pass_gate is not True:
+            raise ValueError(
+                "GRPC cutover gate did not pass; keep PROOF_PROVIDER_MODE=snarkjs "
+                "until gates are satisfied"
+            )
+
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     raw = os.getenv(name)
@@ -149,3 +207,16 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be a boolean value")
+
+
+def _extract_cutover_pass_gate(payload: Any) -> bool | None:
+    if isinstance(payload, dict):
+        direct = payload.get("pass_gate")
+        if isinstance(direct, bool):
+            return direct
+        result = payload.get("result")
+        if isinstance(result, dict):
+            nested = result.get("pass_gate")
+            if isinstance(nested, bool):
+                return nested
+    return None

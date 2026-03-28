@@ -11,8 +11,9 @@ integrators, and contributors.
 4. [Policy Packs](POLICY_PACKS.md)
 5. [Operations Runbook](OPERATIONS.md)
 6. [Development Guide](DEVELOPMENT.md)
-7. [Security Model](SECURITY.md)
-8. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
+7. [Provider Cutover Gate](CUTOVER.md)
+8. [Security Model](SECURITY.md)
+9. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
 
 ## Existing Policy Docs
 
