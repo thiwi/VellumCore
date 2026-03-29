@@ -81,6 +81,13 @@ python -m pytest -m security
 RUN_E2E=1 python -m pytest -m "e2e and critical"
 ```
 
+GitHub CI runs the same quality gates plus dependency and native-prover checks:
+
+- `pip-audit -r requirements.txt` (dependency CVE gate)
+- `cargo test --manifest-path native_prover/Cargo.toml` (native prover gate, with `protoc` installed in CI)
+
+See [`docs/CI.md`](docs/CI.md) for the full CI matrix and local reproduction commands.
+
 ## Policy Compiler (Single Source)
 
 `lending_risk_v1` now ships with a canonical DSL source:
@@ -188,6 +195,7 @@ RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
 ## Documentation
 
 - Documentation index: [docs/README.md](docs/README.md)
+- CI and quality gates: [docs/CI.md](docs/CI.md)
 - Migration notes: [docs/MIGRATION_V4_TO_V5.md](docs/MIGRATION_V4_TO_V5.md)
 - API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

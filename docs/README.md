@@ -12,8 +12,9 @@ integrators, and contributors.
 5. [Operations Runbook](OPERATIONS.md)
 6. [Development Guide](DEVELOPMENT.md)
 7. [Provider Cutover Gate](CUTOVER.md)
-8. [Security Model](SECURITY.md)
-9. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
+8. [CI and Quality Gates](CI.md)
+9. [Security Model](SECURITY.md)
+10. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
 
 ## Existing Policy Docs
 

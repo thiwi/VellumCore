@@ -51,12 +51,30 @@ ruff check .
 mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
 ```
 
+Dependency security gate (same as CI):
+
+```bash
+pip install pip-audit
+pip-audit -r requirements.txt
+```
+
 Native prover (optional local run):
 
 ```bash
 cd native_prover
 cargo run --release -- --addr 0.0.0.0:50051 --snarkjs-bin snarkjs
 ```
+
+Native prover test gate (same as CI):
+
+```bash
+cargo test --manifest-path native_prover/Cargo.toml
+```
+
+If build tooling fails with a missing `protoc` binary, install Protocol Buffers compiler first:
+
+- Ubuntu/Debian: `sudo apt-get install -y protobuf-compiler`
+- macOS (Homebrew): `brew install protobuf`
 
 Provider benchmark + cutover gate (manual/local):
 
