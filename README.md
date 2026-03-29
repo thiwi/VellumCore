@@ -1,6 +1,6 @@
 # Vellum Core
 
-Vellum Core v5 is an open-source, compliance-ready ZK pipeline for lending risk controls.
+Vellum Core is an open-source, compliance-ready ZK pipeline for lending risk controls.
 
 ## Positioning
 
