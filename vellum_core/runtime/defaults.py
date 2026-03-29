@@ -33,6 +33,10 @@ from vellum_core.spi import (
     Signer,
 )
 from vellum_core.vault import VaultTransitClient
+from vellum_core.runtime.proof_provider_config import ProofProviderRuntimeConfig
+from vellum_core.runtime.proof_provider_factory import build_proof_provider
+
+_PROVIDER_TYPES = (SnarkJSProvider, GrpcProofProvider, ShadowProofProvider)
 
 
 class FilesystemArtifactStore(ArtifactStore):
@@ -168,37 +172,9 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
 
 def _build_provider(*, settings: Settings, registry: CircuitRegistry) -> ZKProvider:
     """Build primary provider and optional shadow wrapper from settings."""
-    primary = _build_provider_for_mode(
-        mode=settings.proof_provider_mode,
-        settings=settings,
+    runtime_config = ProofProviderRuntimeConfig.from_settings(settings)
+    return build_proof_provider(
         registry=registry,
+        snarkjs_bin=settings.snarkjs_bin,
+        config=runtime_config,
     )
-    if not settings.proof_shadow_mode:
-        return primary
-    shadow = _build_provider_for_mode(
-        mode=settings.proof_shadow_provider_mode,
-        settings=settings,
-        registry=registry,
-    )
-    return ShadowProofProvider(
-        primary=primary,
-        shadow=shadow,
-        compare_public_signals=settings.proof_shadow_compare_public_signals,
-    )
-
-
-def _build_provider_for_mode(
-    *,
-    mode: str,
-    settings: Settings,
-    registry: CircuitRegistry,
-) -> ZKProvider:
-    if mode == "snarkjs":
-        return SnarkJSProvider(registry=registry, snarkjs_bin=settings.snarkjs_bin)
-    if mode == "grpc":
-        return GrpcProofProvider(
-            registry=registry,
-            endpoint=settings.grpc_prover_endpoint,
-            timeout_seconds=settings.grpc_prover_timeout_seconds,
-        )
-    raise ValueError(f"unsupported proof provider mode: {mode}")
