@@ -37,6 +37,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping lint/type gates."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - name: Ruff
@@ -70,6 +72,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping unit tests."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - name: Unit tests
@@ -83,6 +87,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping integration tests."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - name: Integration tests
@@ -96,6 +102,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping contract tests."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - name: Contract tests
@@ -109,6 +117,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping security regression tests."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - name: Security regression tests
@@ -122,6 +132,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping critical e2e."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - name: Critical E2E
@@ -135,6 +147,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping package build."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
         with:
@@ -187,6 +201,8 @@ jobs:
       - name: Docs-only PR short-circuit
         if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true'
         run: echo "Docs-only PR detected; skipping dependency scan."
+      - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
       - uses: ./.github/actions/python-dev-setup
         if: github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true'
         with:
