@@ -74,17 +74,32 @@ Run checks:
 ```bash
 ruff check .
 mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+python scripts/sync_requirements.py check
 python -m pytest -m unit
 python -m pytest -m integration
 python -m pytest -m contract
 python -m pytest -m security
 RUN_E2E=1 python -m pytest -m "e2e and critical"
+cargo test --manifest-path native_prover/Cargo.toml
+pip install pip-audit
+pip-audit -r requirements.txt
+python -m build
 ```
 
-GitHub CI runs the same quality gates plus dependency and native-prover checks:
+Dependency governance (canonical source = `pyproject.toml`):
+
+```bash
+python scripts/sync_requirements.py export
+python scripts/sync_requirements.py check
+```
+
+`requirements.txt` stays committed for Dockerfiles and `pip-audit`, but must match `pyproject.toml`.
+
+GitHub CI runs the same quality gates:
 
 - `pip-audit -r requirements.txt` (dependency CVE gate)
-- `cargo test --manifest-path native_prover/Cargo.toml` (native prover gate, with `protoc` installed in CI)
+- `cargo test --manifest-path native_prover/Cargo.toml` (native prover gate)
+- `python scripts/sync_requirements.py check` (requirements drift gate)
 
 See [`docs/CI.md`](docs/CI.md) for the full CI matrix and local reproduction commands.
 
@@ -129,6 +144,10 @@ Rust service sources live in [`native_prover/`](native_prover/README.md).
 Current phase keeps Circom compatibility with split backend:
 - generate via `snarkjs` (or optional `rapidsnark` path inside native-prover)
 - verify via native Rust `arkworks` (BN254/Groth16)
+
+Local prerequisite for Rust build/tests: `protoc` (Protocol Buffers compiler).
+- Ubuntu/Debian: `sudo apt-get install -y protobuf-compiler`
+- macOS: `brew install protobuf`
 
 Cutover gate evaluation:
 

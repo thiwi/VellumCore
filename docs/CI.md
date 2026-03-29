@@ -4,14 +4,23 @@ This document describes the GitHub CI workflow checks for `main` and how to repr
 
 ## Workflow Scope
 
-The primary workflow is [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) and runs on:
+Primary workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+
+Triggers:
 
 - pull requests
 - pushes to `main`
 
+Workflow-level controls:
+
+- concurrency cancellation: `ci-${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true`
+- GitHub action runtime compatibility pin: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`
+- docs-only PR short-circuit (jobs remain present/green, heavy steps are skipped)
+
 ## CI Jobs
 
-- `lint_type`: Ruff + MyPy + policy compiler drift gate
+- `changes`: path filter used for docs-only short-circuit decisions
+- `lint_type`: Ruff + MyPy + requirements drift + policy compiler drift
 - `unit_tests`: pytest unit marker
 - `integration_tests`: pytest integration marker
 - `contract_tests`: pytest contract marker
@@ -22,19 +31,38 @@ The primary workflow is [`.github/workflows/ci.yml`](../.github/workflows/ci.yml
 - `security_scan`: dependency CVE scan with `pip-audit`
 - `release_readiness`: required release docs/artifacts presence check
 
-## Security and Native-Prover Gates
+## Reusable Setup and Caching
 
-Two gates are especially important for release safety:
+Python jobs use one shared composite action:
 
-1. Dependency CVE gate
-   - command: `pip-audit -r requirements.txt`
-   - fails CI when known vulnerabilities are present in pinned dependencies
+- [`.github/actions/python-dev-setup/action.yml`](../.github/actions/python-dev-setup/action.yml)
 
-2. Native prover build/test gate
-   - command: `cargo test --manifest-path native_prover/Cargo.toml`
-   - requires `protoc` for protobuf code generation (installed in CI runner)
+It centralizes:
 
-## Local Reproduction
+- checkout
+- `actions/setup-python@v5` with pip cache
+- dependency install
+
+Additional cache:
+
+- Rust cache via `Swatinem/rust-cache@v2` in `native_prover_tests`
+
+## Dependency Governance
+
+Canonical dependency source:
+
+- [`pyproject.toml`](../pyproject.toml) (`[project].dependencies`)
+
+Export/check tool:
+
+- [`scripts/sync_requirements.py`](../scripts/sync_requirements.py)
+
+Rules:
+
+- `requirements.txt` is committed and still consumed by Dockerfiles + `pip-audit`
+- CI fails if `requirements.txt` drifts from `pyproject.toml` (`python scripts/sync_requirements.py check`)
+
+## Local Reproduction (CI Parity)
 
 Install dev dependencies:
 
@@ -47,22 +75,25 @@ Run CI-equivalent checks:
 ```bash
 ruff check .
 mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+python scripts/sync_requirements.py check
 python -m pytest -m unit
 python -m pytest -m integration
 python -m pytest -m contract
 python -m pytest -m security
 RUN_E2E=1 python -m pytest -m "e2e and critical"
+cargo test --manifest-path native_prover/Cargo.toml
 pip install pip-audit
 pip-audit -r requirements.txt
-cargo test --manifest-path native_prover/Cargo.toml
+python -m build
 ```
 
-If `cargo test` fails with missing `protoc`, install:
+Optional local export (after dependency changes):
+
+```bash
+python scripts/sync_requirements.py export
+```
+
+If `cargo test` fails with missing `protoc`, install Protocol Buffers compiler first:
 
 - Ubuntu/Debian: `sudo apt-get install -y protobuf-compiler`
 - macOS: `brew install protobuf`
-
-## Notes
-
-- CI currently emits a GitHub-hosted warning about Node.js 20-based actions.
-- This is a platform deprecation warning from GitHub Actions and does not currently fail the workflow.

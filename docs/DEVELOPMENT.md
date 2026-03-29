@@ -49,6 +49,7 @@ Static checks:
 ```bash
 ruff check .
 mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+python scripts/sync_requirements.py check
 ```
 
 Dependency security gate (same as CI):
@@ -56,6 +57,19 @@ Dependency security gate (same as CI):
 ```bash
 pip install pip-audit
 pip-audit -r requirements.txt
+```
+
+Dependency sync flow (`pyproject.toml` is canonical):
+
+```bash
+python scripts/sync_requirements.py export
+python scripts/sync_requirements.py check
+```
+
+Package build gate (same as CI):
+
+```bash
+python -m build
 ```
 
 Native prover (optional local run):
