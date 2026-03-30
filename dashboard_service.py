@@ -193,7 +193,7 @@ async def _jwt_token() -> str:
     return await jwt_signer.sign(
         subject="dashboard-demo-user",
         ttl_seconds=600,
-        scopes={"proofs:write", "proofs:read", "audit:read"},
+        scopes={"proofs:write", "proofs:read", "audit:read", "ops:read", "ops:write"},
     )
 
 

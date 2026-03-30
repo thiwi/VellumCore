@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from vellum_core.config import Settings
@@ -46,48 +43,22 @@ def test_invalid_proof_provider_mode_rejected(monkeypatch: pytest.MonkeyPatch) -
 def test_invalid_shadow_mode_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SECURITY_PROFILE", "dev")
     monkeypatch.setenv("VELLUM_DATA_KEY", "vellum-data")
-    monkeypatch.setenv("PROOF_SHADOW_PROVIDER_MODE", "invalid")
+    monkeypatch.setenv("PROOF_SHADOW_MODE", "true")
+    with pytest.raises(ValueError, match="PROOF_SHADOW_MODE"):
+        Settings.from_env()
+
+
+def test_invalid_shadow_provider_mode_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SECURITY_PROFILE", "dev")
+    monkeypatch.setenv("VELLUM_DATA_KEY", "vellum-data")
+    monkeypatch.setenv("PROOF_SHADOW_PROVIDER_MODE", "snarkjs")
     with pytest.raises(ValueError, match="PROOF_SHADOW_PROVIDER_MODE"):
         Settings.from_env()
 
 
-def test_grpc_mode_with_enforced_gate_requires_report_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_non_grpc_mode_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SECURITY_PROFILE", "dev")
     monkeypatch.setenv("VELLUM_DATA_KEY", "vellum-data")
-    monkeypatch.setenv("PROOF_PROVIDER_MODE", "grpc")
-    monkeypatch.setenv("GRPC_CUTOVER_GATE_ENFORCED", "true")
-    monkeypatch.delenv("GRPC_CUTOVER_GATE_REPORT_PATH", raising=False)
-    with pytest.raises(ValueError, match="GRPC_CUTOVER_GATE_REPORT_PATH"):
+    monkeypatch.setenv("PROOF_PROVIDER_MODE", "snarkjs")
+    with pytest.raises(ValueError, match="PROOF_PROVIDER_MODE must be grpc"):
         Settings.from_env()
-
-
-def test_grpc_mode_with_enforced_gate_rejects_failing_report(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    report = tmp_path / "gate.json"
-    report.write_text(json.dumps({"result": {"pass_gate": False}}), encoding="utf-8")
-    monkeypatch.setenv("SECURITY_PROFILE", "dev")
-    monkeypatch.setenv("VELLUM_DATA_KEY", "vellum-data")
-    monkeypatch.setenv("PROOF_PROVIDER_MODE", "grpc")
-    monkeypatch.setenv("GRPC_CUTOVER_GATE_ENFORCED", "true")
-    monkeypatch.setenv("GRPC_CUTOVER_GATE_REPORT_PATH", str(report))
-    with pytest.raises(ValueError, match="did not pass"):
-        Settings.from_env()
-
-
-def test_grpc_mode_with_enforced_gate_accepts_passing_report(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    report = tmp_path / "gate.json"
-    report.write_text(json.dumps({"pass_gate": True}), encoding="utf-8")
-    monkeypatch.setenv("SECURITY_PROFILE", "dev")
-    monkeypatch.setenv("VELLUM_DATA_KEY", "vellum-data")
-    monkeypatch.setenv("PROOF_PROVIDER_MODE", "grpc")
-    monkeypatch.setenv("GRPC_CUTOVER_GATE_ENFORCED", "true")
-    monkeypatch.setenv("GRPC_CUTOVER_GATE_REPORT_PATH", str(report))
-    settings = Settings.from_env()
-    assert settings.proof_provider_mode == "grpc"

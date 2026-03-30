@@ -13,6 +13,7 @@ Validation checks:
 - required claims (`sub`, `iat`, `nbf`, `exp`, `jti`)
 - max token lifetime (`JWT_MAX_TTL_SECONDS`)
 - scope enforcement per route (`proofs:write`, `proofs:read`, `audit:read`)
+- admin scope enforcement for DLQ operations (`ops:read`, `ops:write`)
 
 ### 2) Bank request handshake (prover submit)
 

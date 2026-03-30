@@ -8,6 +8,7 @@ use tonic::{Request, Response, Status};
 
 use crate::backend::{
     generate_witness, internal_error, run_rapidsnark_prove, run_snarkjs_fullprove,
+    run_snarkjs_verify,
 };
 use crate::cli::{GenerateBackend, WitnessBackend};
 use crate::parsing::ensure_json;
@@ -105,15 +106,38 @@ impl Prover for ProverService {
         ensure_json(&req.proof_json, "proof_json")?;
         ensure_json(&req.public_signals_json, "public_signals_json")?;
 
-        let cached_key = self
+        let native_valid = self
             .get_or_load_verification_key(req.verification_key_path.as_str())
-            .await?;
-        let valid = verify_native_proof(
-            cached_key.as_ref(),
-            req.proof_json.as_str(),
-            req.public_signals_json.as_str(),
-        )?;
+            .await
+            .and_then(|cached_key| {
+                verify_native_proof(
+                    cached_key.as_ref(),
+                    req.proof_json.as_str(),
+                    req.public_signals_json.as_str(),
+                )
+            })
+            .unwrap_or(false);
+        if native_valid {
+            return Ok(Response::new(VerifyProofResponse { valid: true }));
+        }
 
+        let tmp = TempDir::new().map_err(internal_error)?;
+        let proof_path = tmp.path().join("proof.json");
+        let public_path = tmp.path().join("public.json");
+        fs::write(&proof_path, req.proof_json)
+            .await
+            .map_err(internal_error)?;
+        fs::write(&public_path, req.public_signals_json)
+            .await
+            .map_err(internal_error)?;
+
+        let valid = run_snarkjs_verify(
+            &self.snarkjs_bin,
+            req.verification_key_path.as_str(),
+            &public_path,
+            &proof_path,
+        )
+        .await?;
         Ok(Response::new(VerifyProofResponse { valid }))
     }
 }

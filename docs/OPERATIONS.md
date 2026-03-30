@@ -56,6 +56,8 @@ curl -fsS http://localhost:8002/healthz
 ### Job in `failed`
 
 - Inspect `error` on job payload.
+- Inspect DLQ entries via `GET /v6/ops/dlq` (scope `ops:read`).
+- Use `POST /v6/ops/dlq/{dlq_id}/requeue` (scope `ops:write`) for controlled reruns.
 - Verify artifacts exist and match manifest (`vellum circuits validate --json`).
 - Re-submit as a new job after fix.
 
@@ -80,4 +82,5 @@ curl -fsS http://localhost:8002/healthz
 
 - PostgreSQL is source of truth for job and audit state.
 - `shared_assets/` must remain consistent with circuit manifests.
+- Maintenance worker archives aged proof/evidence files under `shared_assets/proofs/archive`.
 - If rebuilding artifacts, run `docker compose run --rm framework-init` before resuming operations.

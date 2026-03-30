@@ -279,3 +279,108 @@ def test_v6_batch_submit_rejects_private_input_schema_violation(
     assert response.status_code == 422
     body = response.json()
     assert body["error"]["code"] == "invalid_private_input_schema"
+
+
+@pytest.mark.integration
+def test_v6_ops_dlq_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    prover_service = _load_prover_service(monkeypatch)
+    _patch_auth(monkeypatch, prover_service, required_scope="ops:read")
+
+    async def fake_list_dead_letter_jobs(*, status: str | None = None, limit: int = 50) -> list[Any]:
+        _ = (status, limit)
+        return [
+            SimpleNamespace(
+                id=1,
+                proof_id="proof-1",
+                circuit_id="batch_credit_check",
+                status="open",
+                error_class="timeout",
+                retryable=True,
+                failure_reason="soft_time_limit_exceeded",
+                error_message="timeout",
+                attempt_count=1,
+                max_attempts=3,
+                rerun_proof_id=None,
+                triage_details={"detail": "Execution exceeded timeout budget."},
+                created_at="2026-03-30T10:00:00Z",
+                updated_at="2026-03-30T10:00:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(
+        prover_service.db,
+        "list_dead_letter_jobs",
+        fake_list_dead_letter_jobs,
+        raising=False,
+    )
+
+    client = TestClient(prover_service.app)
+    response = client.get("/v6/ops/dlq", headers={"Authorization": "Bearer demo"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["items"][0]["proof_id"] == "proof-1"
+
+
+@pytest.mark.integration
+def test_v6_ops_dlq_requeue(monkeypatch: pytest.MonkeyPatch) -> None:
+    prover_service = _load_prover_service(monkeypatch)
+    _patch_auth(monkeypatch, prover_service, required_scope="ops:write")
+    calls: dict[str, Any] = {}
+
+    async def fake_get_dead_letter_job(*, dlq_id: int) -> Any:
+        _ = dlq_id
+        return SimpleNamespace(
+            id=1,
+            proof_id="proof-1",
+            circuit_id="batch_credit_check",
+            rerun_proof_id=None,
+            sealed_rerun_payload="sealed",
+        )
+
+    async def fake_get_proof_job(_proof_id: str) -> Any:
+        return SimpleNamespace(
+            input_fingerprint="fp",
+            input_summary={"source_mode": "policy_run", "circuit_id": "batch_credit_check"},
+            meta={"source_mode": "policy_run", "policy_id": "lending_risk_v1"},
+        )
+
+    async def fake_create_proof_job(**kwargs: Any) -> Any:
+        calls["create_proof_job"] = kwargs
+        return SimpleNamespace(proof_id=kwargs["proof_id"])
+
+    async def fake_append_event(**kwargs: Any) -> dict[str, Any]:
+        calls.setdefault("append_event", []).append(kwargs)
+        return {"id": 1}
+
+    async def fake_enqueue(*, task_name: str, args: list[Any], queue: str) -> None:
+        calls["enqueue"] = {"task_name": task_name, "args": args, "queue": queue}
+
+    async def fake_mark_dead_letter_job_requeued(**kwargs: Any) -> Any:
+        calls["mark_requeued"] = kwargs
+        return SimpleNamespace(id=1)
+
+    monkeypatch.setattr(prover_service.db, "get_dead_letter_job", fake_get_dead_letter_job, raising=False)
+    monkeypatch.setattr(prover_service.db, "get_proof_job", fake_get_proof_job, raising=False)
+    monkeypatch.setattr(prover_service.db, "create_proof_job", fake_create_proof_job, raising=False)
+    monkeypatch.setattr(
+        prover_service.db,
+        "mark_dead_letter_job_requeued",
+        fake_mark_dead_letter_job_requeued,
+        raising=False,
+    )
+    monkeypatch.setattr(prover_service.audit_store, "append_event", fake_append_event, raising=False)
+    monkeypatch.setattr(prover_service.framework.job_backend, "enqueue", fake_enqueue)
+
+    client = TestClient(prover_service.app)
+    response = client.post(
+        "/v6/ops/dlq/1/requeue",
+        json={"reason": "manual rerun"},
+        headers={"Authorization": "Bearer demo"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["source_proof_id"] == "proof-1"
+    assert calls["enqueue"]["task_name"] == "worker.process_proof_job"
+    assert calls["mark_requeued"]["dlq_id"] == 1

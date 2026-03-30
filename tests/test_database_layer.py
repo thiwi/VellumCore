@@ -12,6 +12,7 @@ from vellum_core.database import (
     AuditAppendInput,
     AuditLog,
     Database,
+    DeadLetterJob,
     ProofJob,
     SecurityEvent,
     _normalize_audit_payload,
@@ -284,3 +285,39 @@ def test_append_security_event_defaults_and_fields() -> None:
     assert row.event_type == "jwt_invalid"
     assert row.outcome == "denied"
     assert row.details == {}
+
+
+def test_upsert_dead_letter_job_and_mark_requeued() -> None:
+    session = _FakeSession()
+    db = _db_with_session(session)
+    row = asyncio.run(
+        db.upsert_dead_letter_job(
+            proof_id="p7",
+            circuit_id="batch_credit_check",
+            error_class="timeout",
+            retryable=True,
+            failure_reason="soft_time_limit_exceeded",
+            error_message="timeout",
+            attempt_count=1,
+            max_attempts=3,
+            triage_details={"detail": "timeout"},
+            job_metadata={"mode": "batch"},
+            sealed_rerun_payload="sealed",
+        )
+    )
+    assert isinstance(row, DeadLetterJob)
+    assert row.proof_id == "p7"
+    assert row.status == "open"
+
+    session.get_map[(DeadLetterJob, 1)] = row
+    marked = asyncio.run(
+        db.mark_dead_letter_job_requeued(
+            dlq_id=1,
+            rerun_proof_id="rerun-1",
+            requested_by="ops-user",
+            reason="manual",
+        )
+    )
+    assert marked is row
+    assert row.status == "requeued"
+    assert row.rerun_proof_id == "rerun-1"

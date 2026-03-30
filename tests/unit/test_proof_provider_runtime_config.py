@@ -51,7 +51,7 @@ def _settings(tmp_path: Path, **overrides: object) -> Settings:
         "worker_metrics_host": "127.0.0.1",
         "worker_metrics_port": 9108,
         "native_verify_baseline_seconds": 0.000005,
-        "proof_provider_mode": "snarkjs",
+        "proof_provider_mode": "grpc",
         "grpc_prover_endpoint": "127.0.0.1:50051",
         "grpc_prover_timeout_seconds": 30.0,
         "proof_shadow_mode": False,
@@ -78,17 +78,11 @@ def _write_manifest(circuits_dir: Path, *, circuit_id: str) -> None:
 
 @pytest.mark.unit
 def test_runtime_config_normalizes_from_settings(tmp_path: Path) -> None:
-    settings = _settings(
-        tmp_path,
-        proof_provider_mode="grpc",
-        proof_shadow_mode=True,
-        proof_shadow_provider_mode="snarkjs",
-    )
+    settings = _settings(tmp_path, proof_provider_mode="grpc")
 
     runtime = ProofProviderRuntimeConfig.from_settings(settings)
-    assert runtime.primary_mode == "grpc"
-    assert runtime.shadow_enabled is True
-    assert runtime.shadow_mode == "snarkjs"
+    assert runtime.grpc_endpoint == "127.0.0.1:50051"
+    assert runtime.grpc_timeout_seconds == 30.0
 
 
 @pytest.mark.unit
@@ -100,20 +94,14 @@ def test_runtime_config_rejects_invalid_grpc_timeout(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_factory_builds_shadow_provider_when_enabled(tmp_path: Path) -> None:
+def test_factory_builds_grpc_provider(tmp_path: Path) -> None:
     _write_manifest(tmp_path / "circuits", circuit_id="batch_credit_check")
-    settings = _settings(
-        tmp_path,
-        proof_provider_mode="snarkjs",
-        proof_shadow_mode=True,
-        proof_shadow_provider_mode="grpc",
-    )
+    settings = _settings(tmp_path, proof_provider_mode="grpc")
     runtime = ProofProviderRuntimeConfig.from_settings(settings)
     registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
 
     provider = build_proof_provider(
         registry=registry,
-        snarkjs_bin=settings.snarkjs_bin,
         config=runtime,
     )
-    assert provider.__class__.__name__ == "ShadowProofProvider"
+    assert provider.__class__.__name__ == "GrpcProofProvider"

@@ -129,6 +129,30 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  native-prover:
+    build:
+      context: .
+      dockerfile: Dockerfile.native-prover
+      args:
+        RAPIDSNARK_DOWNLOAD_URL: ${RAPIDSNARK_DOWNLOAD_URL:-}
+        WITNESSCALC_DOWNLOAD_URL: ${WITNESSCALC_DOWNLOAD_URL:-}
+    image: vellum/native-prover:dev
+    environment:
+      NATIVE_PROVER_ADDR: 0.0.0.0:50051
+      SNARKJS_BIN: snarkjs
+      NATIVE_GENERATE_BACKEND: ${NATIVE_GENERATE_BACKEND:-snarkjs}
+      RAPIDSNARK_BIN: ${RAPIDSNARK_BIN:-rapidsnark}
+      NATIVE_WITNESS_BACKEND: ${NATIVE_WITNESS_BACKEND:-snarkjs}
+      WITNESS_GEN_BIN: ${WITNESS_GEN_BIN:-witnesscalc}
+    volumes:
+      - shared_assets:/shared_assets
+    ports:
+      - "50051:50051"
+    depends_on:
+      framework-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   prover:
     build:
       context: .
@@ -173,14 +197,18 @@ services:
       PROVER_MAX_PARALLEL_PROOFS: 2
       VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
       NATIVE_VERIFY_BASELINE_SECONDS: 0.000005
-      PROOF_PROVIDER_MODE: ${PROOF_PROVIDER_MODE:-snarkjs}
+      PROOF_PROVIDER_MODE: ${PROOF_PROVIDER_MODE:-grpc}
       GRPC_PROVER_ENDPOINT: ${GRPC_PROVER_ENDPOINT:-native-prover:50051}
       GRPC_PROVER_TIMEOUT_SECONDS: ${GRPC_PROVER_TIMEOUT_SECONDS:-30}
-      PROOF_SHADOW_MODE: ${PROOF_SHADOW_MODE:-false}
-      PROOF_SHADOW_PROVIDER_MODE: ${PROOF_SHADOW_PROVIDER_MODE:-grpc}
-      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS: ${PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS:-true}
-      GRPC_CUTOVER_GATE_ENFORCED: ${GRPC_CUTOVER_GATE_ENFORCED:-false}
-      GRPC_CUTOVER_GATE_REPORT_PATH: ${GRPC_CUTOVER_GATE_REPORT_PATH:-}
+      PROOF_SHADOW_MODE: "false"
+      PROOF_SHADOW_PROVIDER_MODE: grpc
+      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS: "false"
+      GRPC_CUTOVER_GATE_ENFORCED: "false"
+      GRPC_CUTOVER_GATE_REPORT_PATH: ""
+      JOB_RUNTIME_RETENTION_DAYS: ${JOB_RUNTIME_RETENTION_DAYS:-7}
+      FILE_ARCHIVE_AFTER_DAYS: ${FILE_ARCHIVE_AFTER_DAYS:-30}
+      MAINTENANCE_INTERVAL_SECONDS: ${MAINTENANCE_INTERVAL_SECONDS:-3600}
+      MAINTENANCE_CYCLE_FILE_SCAN_LIMIT: ${MAINTENANCE_CYCLE_FILE_SCAN_LIMIT:-1000}
       LOG_LEVEL: INFO
       OTEL_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -202,6 +230,8 @@ services:
         condition: service_completed_successfully
       framework-init:
         condition: service_completed_successfully
+      native-prover:
+        condition: service_started
       otel-collector:
         condition: service_started
     healthcheck:
@@ -254,14 +284,18 @@ services:
       METRICS_REQUIRE_AUTH: "false"
       PROVER_MAX_PARALLEL_PROOFS: 2
       VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
-      PROOF_PROVIDER_MODE: ${PROOF_PROVIDER_MODE:-snarkjs}
+      PROOF_PROVIDER_MODE: ${PROOF_PROVIDER_MODE:-grpc}
       GRPC_PROVER_ENDPOINT: ${GRPC_PROVER_ENDPOINT:-native-prover:50051}
       GRPC_PROVER_TIMEOUT_SECONDS: ${GRPC_PROVER_TIMEOUT_SECONDS:-30}
-      PROOF_SHADOW_MODE: ${PROOF_SHADOW_MODE:-false}
-      PROOF_SHADOW_PROVIDER_MODE: ${PROOF_SHADOW_PROVIDER_MODE:-grpc}
-      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS: ${PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS:-true}
-      GRPC_CUTOVER_GATE_ENFORCED: ${GRPC_CUTOVER_GATE_ENFORCED:-false}
-      GRPC_CUTOVER_GATE_REPORT_PATH: ${GRPC_CUTOVER_GATE_REPORT_PATH:-}
+      PROOF_SHADOW_MODE: "false"
+      PROOF_SHADOW_PROVIDER_MODE: grpc
+      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS: "false"
+      GRPC_CUTOVER_GATE_ENFORCED: "false"
+      GRPC_CUTOVER_GATE_REPORT_PATH: ""
+      JOB_RUNTIME_RETENTION_DAYS: ${JOB_RUNTIME_RETENTION_DAYS:-7}
+      FILE_ARCHIVE_AFTER_DAYS: ${FILE_ARCHIVE_AFTER_DAYS:-30}
+      MAINTENANCE_INTERVAL_SECONDS: ${MAINTENANCE_INTERVAL_SECONDS:-3600}
+      MAINTENANCE_CYCLE_FILE_SCAN_LIMIT: ${MAINTENANCE_CYCLE_FILE_SCAN_LIMIT:-1000}
       WORKER_METRICS_HOST: 0.0.0.0
       WORKER_METRICS_PORT: 9108
       LOG_LEVEL: INFO
@@ -282,10 +316,87 @@ services:
         condition: service_healthy
       framework-init:
         condition: service_completed_successfully
+      native-prover:
+        condition: service_started
       prover:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
+  maintenance:
+    build:
+      context: .
+      dockerfile: Dockerfile.prover
+    image: vellum/maintenance:dev
+    environment:
+      APP_NAME: vellum-maintenance
+      CIRCUITS_DIR: /app/circuits
+      POLICY_PACKS_DIR: /app/policy_packs
+      SHARED_ASSETS_DIR: /shared_assets
+      PROOF_OUTPUT_DIR: /shared_assets/proofs
+      SNARKJS_BIN: snarkjs
+      DATABASE_URL: postgresql+asyncpg://vellum:vellum@postgres:5432/vellum
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_QUEUE: vellum-queue
+      REDIS_URL: redis://redis:6379/1
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VELLUM_JWT_KEY: vellum-jwt
+      VELLUM_AUDIT_KEY: vellum-audit
+      VELLUM_BANK_KEY: vellum-bank
+      VELLUM_DATA_KEY: vellum-data
+      BANK_KEY_ID: bank-key-1
+      BANK_KEY_MAPPING_JSON: '{"bank-key-1":"vellum-bank"}'
+      SECURITY_PROFILE: dev
+      JWT_ISSUER: bank.local
+      JWT_AUDIENCE: sentinel-zk
+      NONCE_WINDOW_SECONDS: 300
+      JWT_MAX_TTL_SECONDS: 900
+      JWT_LEEWAY_SECONDS: 30
+      SUBMIT_RATE_LIMIT_PER_MINUTE: 120
+      MAX_SUBMIT_BODY_BYTES: 1048576
+      CELERY_TASK_SOFT_TIME_LIMIT_SECONDS: 50
+      CELERY_TASK_TIME_LIMIT_SECONDS: 60
+      CELERY_WORKER_MAX_TASKS_PER_CHILD: 100
+      PROOF_JOB_MAX_ATTEMPTS: 3
+      METRICS_REQUIRE_AUTH: "false"
+      PROVER_MAX_PARALLEL_PROOFS: 1
+      VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
+      PROOF_PROVIDER_MODE: grpc
+      GRPC_PROVER_ENDPOINT: native-prover:50051
+      GRPC_PROVER_TIMEOUT_SECONDS: 30
+      PROOF_SHADOW_MODE: "false"
+      PROOF_SHADOW_PROVIDER_MODE: grpc
+      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS: "false"
+      GRPC_CUTOVER_GATE_ENFORCED: "false"
+      GRPC_CUTOVER_GATE_REPORT_PATH: ""
+      JOB_RUNTIME_RETENTION_DAYS: ${JOB_RUNTIME_RETENTION_DAYS:-7}
+      FILE_ARCHIVE_AFTER_DAYS: ${FILE_ARCHIVE_AFTER_DAYS:-30}
+      MAINTENANCE_INTERVAL_SECONDS: ${MAINTENANCE_INTERVAL_SECONDS:-3600}
+      MAINTENANCE_CYCLE_FILE_SCAN_LIMIT: ${MAINTENANCE_CYCLE_FILE_SCAN_LIMIT:-1000}
+      LOG_LEVEL: INFO
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - ./circuits:/app/circuits:ro
+      - ./policy_packs:/app/policy_packs:ro
+      - shared_assets:/shared_assets
+    command: ["python", "maintenance_worker.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      framework-init:
+        condition: service_completed_successfully
+      native-prover:
+        condition: service_started
       otel-collector:
         condition: service_started
     restart: unless-stopped
@@ -325,6 +436,12 @@ services:
       METRICS_REQUIRE_AUTH: "false"
       SUBMIT_RATE_LIMIT_PER_MINUTE: 120
       VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS: 300
+      PROOF_PROVIDER_MODE: grpc
+      GRPC_PROVER_ENDPOINT: native-prover:50051
+      GRPC_PROVER_TIMEOUT_SECONDS: 60
+      PROOF_SHADOW_MODE: "false"
+      PROOF_SHADOW_PROVIDER_MODE: grpc
+      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS: "false"
       NATIVE_VERIFY_BASELINE_SECONDS: 0.000005
       LOG_LEVEL: INFO
       OTEL_ENABLED: "true"
@@ -346,6 +463,8 @@ services:
         condition: service_completed_successfully
       framework-init:
         condition: service_completed_successfully
+      native-prover:
+        condition: service_started
       otel-collector:
         condition: service_started
     healthcheck:

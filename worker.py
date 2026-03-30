@@ -18,8 +18,10 @@ from vellum_core.celery_app import celery_app
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.logic.batcher import batch_prepare_from_private_input
+from vellum_core.logic.failure_triage import classify_failure
 from vellum_core.logic.job_attempts import next_attempt_metadata
 from vellum_core.logic.private_input_schema import validate_private_input_schema
+from vellum_core.maintenance import run_maintenance_cycle as run_data_lifecycle_cycle
 from vellum_core.metrics import observe_proof_duration
 from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.policies.dual_track import (
@@ -69,6 +71,51 @@ def process_proof_job(proof_id: str) -> str:
     return proof_id
 
 
+@celery_app.task(name="worker.run_maintenance_cycle")
+def run_maintenance_cycle_task() -> dict[str, int]:
+    """Celery task entrypoint for periodic lifecycle maintenance."""
+    return asyncio.run(_run_maintenance_cycle_async())
+
+
+async def _run_maintenance_cycle_async() -> dict[str, int]:
+    report = await run_data_lifecycle_cycle(settings=settings)
+    payload = {
+        "runtime_rows_pruned": report.runtime_rows_pruned,
+        "proof_files_archived": report.proof_files_archived,
+        "evidence_files_archived": report.evidence_files_archived,
+    }
+    logger.info("maintenance_cycle_completed", extra=payload)
+    return payload
+
+
+async def _record_dead_letter_job(
+    *,
+    db: Database,
+    job: object,
+    failure_reason: str,
+    error_message: str,
+    attempt_metadata: dict[str, int],
+    sealed_rerun_payload: str | None,
+) -> None:
+    triage = classify_failure(
+        failure_reason=failure_reason,
+        error_message=error_message,
+    )
+    await db.upsert_dead_letter_job(
+        proof_id=str(job.proof_id),
+        circuit_id=str(job.circuit_id),
+        error_class=triage.error_class,
+        retryable=triage.retryable,
+        failure_reason=failure_reason,
+        error_message=error_message,
+        attempt_count=int(attempt_metadata.get("attempt_count", 0)),
+        max_attempts=int(attempt_metadata.get("max_attempts", 0)),
+        triage_details={"detail": triage.detail},
+        job_metadata=dict((job.meta or {})),
+        sealed_rerun_payload=sealed_rerun_payload,
+    )
+
+
 async def _process_proof_job_async(proof_id: str) -> None:
     """Execute full proof-job lifecycle and persist state/audit transitions."""
     logger.info("proof_job_processing_started", extra={"proof_id": proof_id})
@@ -105,6 +152,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
     attempt_count = attempt_metadata["attempt_count"]
     if attempts_exceeded:
         failure_reason = f"proof job exceeded max attempts ({max_attempts})"
+        sealed_rerun_payload = job.sealed_job_payload
         failed_job = await db.update_proof_job(
             proof_id=proof_id,
             status="failed",
@@ -125,6 +173,14 @@ async def _process_proof_job_async(proof_id: str) -> None:
             public_signals=[],
             metadata=failed_metadata,
             error=failure_reason,
+        )
+        await _record_dead_letter_job(
+            db=db,
+            job=job,
+            failure_reason="max_attempts_exceeded",
+            error_message=failure_reason,
+            attempt_metadata=attempt_metadata,
+            sealed_rerun_payload=sealed_rerun_payload,
         )
         await db.purge_sealed_job_payload(proof_id=proof_id)
         logger.error(
@@ -288,6 +344,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
             },
         )
     except SoftTimeLimitExceeded:
+        sealed_rerun_payload = job.sealed_job_payload
         timeout_error = (
             "proof job exceeded celery soft time limit "
             f"({settings.celery_task_soft_time_limit_seconds}s)"
@@ -317,6 +374,14 @@ async def _process_proof_job_async(proof_id: str) -> None:
             metadata=failed_metadata,
             error=timeout_error,
         )
+        await _record_dead_letter_job(
+            db=db,
+            job=job,
+            failure_reason="soft_time_limit_exceeded",
+            error_message=timeout_error,
+            attempt_metadata=attempt_metadata,
+            sealed_rerun_payload=sealed_rerun_payload,
+        )
         logger.exception(
             "proof_job_soft_time_limit_exceeded",
             extra={
@@ -327,6 +392,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
         )
         raise
     except Exception as exc:
+        sealed_rerun_payload = job.sealed_job_payload
         failed_job = await db.update_proof_job(
             proof_id=proof_id,
             status="failed",
@@ -351,6 +417,14 @@ async def _process_proof_job_async(proof_id: str) -> None:
             public_signals=[],
             metadata=failed_metadata,
             error=str(exc),
+        )
+        await _record_dead_letter_job(
+            db=db,
+            job=job,
+            failure_reason="runtime_exception",
+            error_message=str(exc),
+            attempt_metadata=attempt_metadata,
+            sealed_rerun_payload=sealed_rerun_payload,
         )
         logger.exception(
             "proof_job_failed",

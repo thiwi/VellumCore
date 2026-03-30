@@ -8,14 +8,16 @@ Current backend split:
   - `rapidsnark`: witness generation + `rapidsnark` prove
     - witness backend `snarkjs` (default): `snarkjs wtns calculate`
     - witness backend `binary`: `<WITNESS_GEN_BIN> <wasm> <input.json> <witness.wtns>`
-- `VerifyProof`: uses native Rust `arkworks` BN254 Groth16 verification.
+- `VerifyProof`: native-first verification with compatibility fallback:
+  - first attempts Rust `arkworks` BN254/Groth16 verification
+  - if native check is inconclusive/false, falls back to `snarkjs groth16 verify`
 
 ## API
 
 The service implements `proto/vellum_prover.proto`:
 
 - `GenerateProof`: runs selected backend (`snarkjs` fullprove or `rapidsnark` path)
-- `VerifyProof`: verifies natively in Rust (`arkworks` BN254/Groth16)
+- `VerifyProof`: native-first (`arkworks`) with `snarkjs` compatibility fallback
 
 The protobuf package is `vellum.nativeprover`.
 
@@ -73,7 +75,4 @@ Configure Vellum runtime:
 - `PROOF_PROVIDER_MODE=grpc`
 - `GRPC_PROVER_ENDPOINT=<host>:50051`
 
-Optional shadow mode:
-
-- `PROOF_SHADOW_MODE=true`
-- `PROOF_SHADOW_PROVIDER_MODE=grpc`
+Runtime is grpc-only; shadow mode is no longer part of the reference runtime path.

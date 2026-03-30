@@ -236,7 +236,7 @@ async def export_attestation(
         metadata=metadata,
     )
     decision = metadata.get("decision")
-    if job.status != "completed" or job.proof is None:
+    if job.status != "completed":
         raise APIError(
             status_code=409,
             code="attestation_not_ready",
@@ -252,9 +252,22 @@ async def export_attestation(
 
     paths = framework.artifact_store.get_artifact_paths(job.circuit_id)
     artifact_digest_map = artifact_digests(paths)
-    proof_hash = sha256_json(job.proof)
-    public_signals_hash = sha256_json(job.public_signals or [])
     rows = await db.list_audit_rows_for_proof(proof_id=run_id)
+    completed_rows = [row for row in rows if row.status == "completed"]
+    latest_completed = completed_rows[-1] if completed_rows else None
+    if job.proof is not None:
+        proof_hash = sha256_json(job.proof)
+        public_signals_hash = sha256_json(job.public_signals or [])
+    elif latest_completed is not None:
+        proof_hash = latest_completed.proof_hash
+        public_signals_hash = sha256_json(latest_completed.public_signals or [])
+    else:
+        raise APIError(
+            status_code=409,
+            code="attestation_not_ready",
+            message="Attestation not available: proof payload was pruned and no audit fallback exists",
+            details={"run_id": run_id},
+        )
     chain = signature_chain(rows)
 
     return AttestationResponseV6(

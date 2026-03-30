@@ -6,6 +6,7 @@ This index tracks major-version migration guides for Vellum Core HTTP surfaces a
 
 - [Migration v5 to v6](MIGRATION_V5_TO_V6.md)
 - [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
+- [Runtime grpc-only + DLQ/Lifecycle Migration](MIGRATION_V6_TO_V7_RUNTIME.md)
 
 ## Policy
 

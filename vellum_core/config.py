@@ -55,7 +55,7 @@ class Settings:
     worker_metrics_host: str
     worker_metrics_port: int
     native_verify_baseline_seconds: float
-    proof_provider_mode: str = "snarkjs"
+    proof_provider_mode: str = "grpc"
     grpc_prover_endpoint: str = "127.0.0.1:50051"
     grpc_prover_timeout_seconds: float = 30.0
     proof_shadow_mode: bool = False
@@ -63,6 +63,10 @@ class Settings:
     proof_shadow_compare_public_signals: bool = True
     grpc_cutover_gate_enforced: bool = False
     grpc_cutover_gate_report_path: str | None = None
+    job_runtime_retention_days: int = 7
+    file_archive_after_days: int = 30
+    maintenance_interval_seconds: int = 3600
+    maintenance_cycle_file_scan_limit: int = 1000
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -132,6 +136,16 @@ class Settings:
                 1, int(os.getenv("CELERY_WORKER_MAX_TASKS_PER_CHILD", "100"))
             ),
             proof_job_max_attempts=max(1, int(os.getenv("PROOF_JOB_MAX_ATTEMPTS", "3"))),
+            job_runtime_retention_days=max(
+                1, int(os.getenv("JOB_RUNTIME_RETENTION_DAYS", "7"))
+            ),
+            file_archive_after_days=max(1, int(os.getenv("FILE_ARCHIVE_AFTER_DAYS", "30"))),
+            maintenance_interval_seconds=max(
+                30, int(os.getenv("MAINTENANCE_INTERVAL_SECONDS", "3600"))
+            ),
+            maintenance_cycle_file_scan_limit=max(
+                1, int(os.getenv("MAINTENANCE_CYCLE_FILE_SCAN_LIMIT", "1000"))
+            ),
             security_profile=security_profile,
             metrics_require_auth=_parse_bool_env("METRICS_REQUIRE_AUTH", default=True),
             vellum_data_key=os.getenv("VELLUM_DATA_KEY", ""),
@@ -141,7 +155,7 @@ class Settings:
             native_verify_baseline_seconds=float(
                 os.getenv("NATIVE_VERIFY_BASELINE_SECONDS", "0.000005")
             ),
-            proof_provider_mode=os.getenv("PROOF_PROVIDER_MODE", "snarkjs").strip().lower(),
+            proof_provider_mode=os.getenv("PROOF_PROVIDER_MODE", "grpc").strip().lower(),
             grpc_prover_endpoint=os.getenv("GRPC_PROVER_ENDPOINT", "127.0.0.1:50051"),
             grpc_prover_timeout_seconds=float(
                 os.getenv("GRPC_PROVER_TIMEOUT_SECONDS", "30")
@@ -166,10 +180,12 @@ class Settings:
     def _validate(self) -> None:
         if self.security_profile not in {"strict", "dev"}:
             raise ValueError("SECURITY_PROFILE must be either 'strict' or 'dev'")
-        if self.proof_provider_mode not in {"snarkjs", "grpc"}:
-            raise ValueError("PROOF_PROVIDER_MODE must be one of: snarkjs, grpc")
-        if self.proof_shadow_provider_mode not in {"snarkjs", "grpc"}:
-            raise ValueError("PROOF_SHADOW_PROVIDER_MODE must be one of: snarkjs, grpc")
+        if self.proof_provider_mode != "grpc":
+            raise ValueError("PROOF_PROVIDER_MODE must be grpc")
+        if self.proof_shadow_mode:
+            raise ValueError("PROOF_SHADOW_MODE is no longer supported in runtime")
+        if self.proof_shadow_provider_mode != "grpc":
+            raise ValueError("PROOF_SHADOW_PROVIDER_MODE must be grpc")
         if self.grpc_prover_timeout_seconds <= 0:
             raise ValueError("GRPC_PROVER_TIMEOUT_SECONDS must be > 0")
         if self.max_submit_body_bytes <= 0:
@@ -186,8 +202,14 @@ class Settings:
             raise ValueError("CELERY_WORKER_MAX_TASKS_PER_CHILD must be > 0")
         if self.proof_job_max_attempts <= 0:
             raise ValueError("PROOF_JOB_MAX_ATTEMPTS must be > 0")
-        if self.proof_provider_mode == "grpc" and self.grpc_cutover_gate_enforced:
-            self._validate_grpc_cutover_gate()
+        if self.job_runtime_retention_days <= 0:
+            raise ValueError("JOB_RUNTIME_RETENTION_DAYS must be > 0")
+        if self.file_archive_after_days <= 0:
+            raise ValueError("FILE_ARCHIVE_AFTER_DAYS must be > 0")
+        if self.maintenance_interval_seconds <= 0:
+            raise ValueError("MAINTENANCE_INTERVAL_SECONDS must be > 0")
+        if self.maintenance_cycle_file_scan_limit <= 0:
+            raise ValueError("MAINTENANCE_CYCLE_FILE_SCAN_LIMIT must be > 0")
         if not self.vellum_data_key:
             raise ValueError("VELLUM_DATA_KEY is required")
         if self.security_profile != "strict":
@@ -222,8 +244,7 @@ class Settings:
         pass_gate = _extract_cutover_pass_gate(payload)
         if pass_gate is not True:
             raise ValueError(
-                "GRPC cutover gate did not pass; keep PROOF_PROVIDER_MODE=snarkjs "
-                "until gates are satisfied"
+                "GRPC cutover gate did not pass; benchmark regression gates are not satisfied"
             )
 
 

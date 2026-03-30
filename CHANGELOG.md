@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Dead-letter persistence (`dead_letter_jobs`) with deterministic failure triage.
+- Admin DLQ endpoints:
+  - `GET /v6/ops/dlq`
+  - `POST /v6/ops/dlq/{dlq_id}/requeue`
+- Periodic lifecycle maintenance worker (`maintenance_worker.py`) for:
+  - terminal runtime payload pruning
+  - proof/evidence archival to `PROOF_OUTPUT_DIR/archive`
+
+### Changed
+
+- Runtime proof provider is grpc-only (`PROOF_PROVIDER_MODE=grpc`).
+- Runtime shadow-mode provider paths are disabled.
+- Verifier attestation export now supports audit-log fallback when job proof payloads were pruned.
+- Compose verifier runtime now uses explicit `GRPC_PROVER_ENDPOINT` wiring to `native-prover`.
+- Native prover verification is native-first with `snarkjs` fallback for compatibility with generated proof tuples.
+
 ## 6.0.0 - Resource-Oriented V6 Surface
 
 ### Added

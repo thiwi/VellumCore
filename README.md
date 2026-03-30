@@ -128,23 +128,27 @@ Generated files are committed for auditability:
 
 ## Native gRPC Prover (Optional)
 
-Vellum runtime supports two proof backends:
-
-- `snarkjs` (default)
-- `grpc` (Rust native prover service)
+Reference runtime uses the Rust native prover over gRPC (`grpc`-only runtime path).
+Backend strategy inside native-prover can still switch between `snarkjs` and `rapidsnark`
+for benchmarking/compatibility.
 
 Runtime knobs:
 
-- `PROOF_PROVIDER_MODE=snarkjs|grpc`
+- `PROOF_PROVIDER_MODE=grpc` (runtime is grpc-only)
 - `GRPC_PROVER_ENDPOINT=host:port`
-- `PROOF_SHADOW_MODE=true|false`
-- `PROOF_SHADOW_PROVIDER_MODE=snarkjs|grpc`
-- `PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS=true|false`
+- `JOB_RUNTIME_RETENTION_DAYS=7`
+- `FILE_ARCHIVE_AFTER_DAYS=30`
+- `MAINTENANCE_INTERVAL_SECONDS=3600`
 
 Rust service sources live in [`native_prover/`](native_prover/README.md).
 Current phase keeps Circom compatibility with split backend:
 - generate via `snarkjs` (or optional `rapidsnark` path inside native-prover)
 - verify via native Rust `arkworks` (BN254/Groth16)
+
+Admin DLQ operations:
+
+- `GET /v6/ops/dlq` (`ops:read`)
+- `POST /v6/ops/dlq/{dlq_id}/requeue` (`ops:write`)
 
 Local prerequisite for Rust build/tests: `protoc` (Protocol Buffers compiler).
 - Ubuntu/Debian: `sudo apt-get install -y protobuf-compiler`
@@ -156,21 +160,21 @@ Cutover gate evaluation:
 vellum-cutover-gate --summary-json path/to/cutover_summary.json
 ```
 
-Provider benchmark runner (snarkjs vs grpc, same payload):
+Provider benchmark runner:
 
 ```bash
 RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
   ./systematic_study/run_provider_benchmark.sh
 ```
 
-Shadow-assisted gate evaluation (auto derives compared runs + mismatches):
+Regression-assisted gate evaluation (derives compared runs from regression run output):
 
 ```bash
 RUNS=40 SHADOW_RUNS=1200 DAYS_OBSERVED=7 \
   ./systematic_study/run_provider_benchmark.sh
 ```
 
-To run shadow in the same native generate mode as grpc cutover benchmarking:
+To run regression collection in the same native generate mode as grpc benchmarking:
 
 ```bash
 ENABLE_RAPIDSNARK=1 GATE_GRPC_MODE=rapidsnark \

@@ -21,6 +21,7 @@
 - Verify bearer token is present and minted with expected issuer/audience.
 - Ensure claims include `nbf` and `jti`, and token TTL does not exceed `JWT_MAX_TTL_SECONDS`.
 - Ensure token scopes match endpoint requirements (`proofs:write`, `proofs:read`, `audit:read`).
+- For DLQ admin endpoints ensure `ops:read` / `ops:write` are present.
 - Ensure verifier/prover use same JWT key and Vault source.
 
 ### `missing_handshake_headers` / `invalid_handshake_signature`
@@ -63,6 +64,22 @@ docker compose run --rm framework-init
 - Run `GET /v6/audit/verify-chain` and inspect first broken index.
 - Investigate signing key version changes and entry ordering.
 - Avoid manual DB edits to `audit_log`.
+
+### Failed jobs accumulate / no rerun path
+
+- List DLQ entries with `GET /v6/ops/dlq`.
+- Verify `error_class`, `retryable`, and attempt metadata before rerun.
+- Trigger controlled rerun with `POST /v6/ops/dlq/{dlq_id}/requeue`.
+- If rerun returns `already_requeued`, use returned `rerun_proof_id` for tracking.
+
+### Archive growth or missing archived files
+
+- Confirm `maintenance` service is running and healthy.
+- Validate lifecycle env vars:
+  - `JOB_RUNTIME_RETENTION_DAYS`
+  - `FILE_ARCHIVE_AFTER_DAYS`
+  - `MAINTENANCE_INTERVAL_SECONDS`
+- Check `shared_assets/proofs/archive` hierarchy and maintenance logs for cycle summaries.
 
 ## Dashboard Issues
 

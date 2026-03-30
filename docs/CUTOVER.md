@@ -1,6 +1,6 @@
 # Provider Cutover Gate
 
-This document defines how to evaluate readiness for switching primary proof provider from `snarkjs` to `grpc`.
+This document defines benchmark/regression gates for the grpc-native proving runtime.
 
 ## Hard Gates
 
@@ -27,18 +27,17 @@ RUNS=40 SHADOW_RUNS=1200 DAYS_OBSERVED=7 \
   ./systematic_study/run_provider_benchmark.sh
 ```
 
-When `SHADOW_RUNS>0`, the script runs an additional shadow-mode phase
-(`snarkjs` primary + `grpc` shadow), scrapes worker metrics, and feeds
-`compared_runs` + `functional_mismatches` into cutover evaluation automatically.
-Use `SHADOW_NATIVE_GENERATE_BACKEND=rapidsnark` to ensure shadow comparisons
-run against the same native generate backend used for grpc cutover benchmarking.
+When `SHADOW_RUNS>0`, the script runs an additional grpc regression phase and
+derives `compared_runs` + `functional_mismatches` from regression output.
+Use `SHADOW_NATIVE_GENERATE_BACKEND=rapidsnark` to align regression runs with
+the same native generate backend used for grpc benchmarking.
 
 Outputs:
 
 - `systematic_study/reports/provider_cutover/snarkjs_benchmark.json`
 - `systematic_study/reports/provider_cutover/grpc_snarkjs_benchmark.json`
-- `systematic_study/reports/provider_cutover/shadow_benchmark.json` (when `SHADOW_RUNS>0`)
-- `systematic_study/reports/provider_cutover/shadow_summary.json` (when `SHADOW_RUNS>0`)
+- `systematic_study/reports/provider_cutover/shadow_benchmark.json` (regression run output when `SHADOW_RUNS>0`)
+- `systematic_study/reports/provider_cutover/shadow_summary.json` (derived regression summary when `SHADOW_RUNS>0`)
 - `systematic_study/reports/provider_cutover/cutover_gate.json`
 
 Optional extra mode (`rapidsnark` generate backend inside native-prover):
@@ -65,7 +64,7 @@ RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
   ./systematic_study/run_provider_benchmark.sh
 ```
 
-Shadow mode against `rapidsnark` (recommended when evaluating grpc cutover):
+Regression collection against `rapidsnark`:
 
 ```bash
 ENABLE_RAPIDSNARK=1 GATE_GRPC_MODE=rapidsnark \
@@ -99,11 +98,7 @@ Required JSON keys:
 - `snarkjs_p95_ms`
 - `grpc_p95_ms`
 
-## Runtime Enforcement
+## Runtime Note
 
-To block accidental grpc cutover before gates pass, set:
-
-- `GRPC_CUTOVER_GATE_ENFORCED=true`
-- `GRPC_CUTOVER_GATE_REPORT_PATH=/path/to/cutover_gate.json`
-
-When enforced and `PROOF_PROVIDER_MODE=grpc`, startup fails unless the report marks `pass_gate=true`.
+Runtime operates in grpc-only mode. Cutover gate tooling remains available for
+benchmark/regression workflows, but startup is no longer blocked by gate files.

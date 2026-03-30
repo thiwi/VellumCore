@@ -12,11 +12,13 @@ integrators, and contributors.
 5. [Circuit YAML Guide](CIRCUIT_YAML_GUIDE.md)
 6. [Operations Runbook](OPERATIONS.md)
 7. [Development Guide](DEVELOPMENT.md)
-8. [Provider Cutover Gate](CUTOVER.md)
-9. [CI and Quality Gates](CI.md)
-10. [Security Model](SECURITY.md)
-11. [Migrations Index](MIGRATIONS.md)
-12. [Migration v5 to v6](MIGRATION_V5_TO_V6.md)
+8. [DLQ and Lifecycle Operations](DLQ_LIFECYCLE.md)
+9. [Provider Cutover Gate](CUTOVER.md)
+10. [CI and Quality Gates](CI.md)
+11. [Security Model](SECURITY.md)
+12. [Migrations Index](MIGRATIONS.md)
+13. [Migration v5 to v6](MIGRATION_V5_TO_V6.md)
+14. [Runtime grpc-only Migration](MIGRATION_V6_TO_V7_RUNTIME.md)
 
 ## Existing Policy Docs
 

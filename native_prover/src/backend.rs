@@ -128,3 +128,34 @@ pub async fn run_rapidsnark_prove(
         stderr_text(&output)
     )))
 }
+
+pub async fn run_snarkjs_verify(
+    snarkjs_bin: &str,
+    verification_key_path: &str,
+    public_path: &PathBuf,
+    proof_path: &PathBuf,
+) -> Result<bool, Status> {
+    let output = run_command(
+        snarkjs_bin,
+        &[
+            "groth16",
+            "verify",
+            verification_key_path,
+            path_arg(public_path),
+            path_arg(proof_path),
+        ],
+    )
+    .await?;
+    if output.status.success() {
+        return Ok(true);
+    }
+
+    let reason = stderr_text(&output);
+    if reason.to_lowercase().contains("invalid proof") {
+        return Ok(false);
+    }
+    Err(Status::internal(format!(
+        "verify failed: {}",
+        reason
+    )))
+}

@@ -57,20 +57,24 @@ Loaded by `Settings.from_env()` in `vellum_core/config.py`.
 - `WORKER_METRICS_HOST`
 - `WORKER_METRICS_PORT`
 - `NATIVE_VERIFY_BASELINE_SECONDS`
-- `PROOF_PROVIDER_MODE` (`snarkjs` or `grpc`; default: `snarkjs`)
+- `PROOF_PROVIDER_MODE` (`grpc` only; default: `grpc`)
 - `GRPC_PROVER_ENDPOINT` (default: `127.0.0.1:50051`)
 - `GRPC_PROVER_TIMEOUT_SECONDS` (default: `30`)
-- `PROOF_SHADOW_MODE` (`true`/`false`; default: `false`)
-- `PROOF_SHADOW_PROVIDER_MODE` (`snarkjs` or `grpc`; default: `grpc`)
-- `PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS` (`true`/`false`; default: `true`)
-- `GRPC_CUTOVER_GATE_ENFORCED` (`true`/`false`; default: `false`)
-- `GRPC_CUTOVER_GATE_REPORT_PATH` (required when `GRPC_CUTOVER_GATE_ENFORCED=true` and provider mode is `grpc`)
+- `PROOF_SHADOW_MODE` (runtime no longer supports shadow mode; must remain `false`)
+- `PROOF_SHADOW_PROVIDER_MODE` (runtime must remain `grpc`)
+- `PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS` (ignored in grpc-only runtime)
+- `GRPC_CUTOVER_GATE_ENFORCED` (benchmark/regression helper; runtime no longer gates startup on this)
+- `GRPC_CUTOVER_GATE_REPORT_PATH` (benchmark/regression helper path)
 - `NATIVE_GENERATE_BACKEND` (`snarkjs` or `rapidsnark`; native-prover service, default: `snarkjs`)
 - `NATIVE_WITNESS_BACKEND` (`snarkjs` or `binary`; native-prover service, default: `snarkjs`)
 - `WITNESS_GEN_BIN` (native-prover service witness binary, default: `witnesscalc`)
 - `RAPIDSNARK_BIN` (native-prover service prove binary, default: `rapidsnark`)
 - `GATE_GRPC_MODE` (`snarkjs`, `rapidsnark`, or `auto`; benchmark script gate-source selection, default: `snarkjs`)
 - `SHADOW_NATIVE_GENERATE_BACKEND` (`snarkjs` or `rapidsnark`; benchmark script shadow-mode native generate backend, default: `snarkjs` or auto-`rapidsnark` when `ENABLE_RAPIDSNARK=1` and `GATE_GRPC_MODE!=snarkjs`)
+- `JOB_RUNTIME_RETENTION_DAYS` (default: `7`; prune terminal job runtime payload columns)
+- `FILE_ARCHIVE_AFTER_DAYS` (default: `30`; archive aged proof/evidence files)
+- `MAINTENANCE_INTERVAL_SECONDS` (default: `3600`; maintenance worker cycle)
+- `MAINTENANCE_CYCLE_FILE_SCAN_LIMIT` (default: `1000`; max files/jobs per maintenance cycle)
 
 ### Observability / Logging
 

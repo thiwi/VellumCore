@@ -6,13 +6,14 @@ The reference deployment is an operational blueprint built on top of the SDK.
 
 - `prover_service.py`: authenticated job intake and queue submission
 - `worker.py`: asynchronous proof execution and artifact output persistence
+- `maintenance_worker.py`: periodic retention and archive lifecycle worker
 - `verifier_service.py`: proof verification, circuit status, trust-speed, and audit validation
 - `dashboard_service.py`: operations cockpit and API aggregation/proxy layer
 
 ## Startup Behavior (Compose)
 
 - `framework-init` runs once to prepare circuit artifacts before service health gates.
-- `prover`, `worker`, and `verifier` depend on successful `framework-init` completion.
+- `prover`, `worker`, `verifier`, and `maintenance` depend on successful `framework-init` completion.
 - Rebuild artifacts on demand with: `docker compose run --rm framework-init`
 
 ## Primary v6 Endpoints

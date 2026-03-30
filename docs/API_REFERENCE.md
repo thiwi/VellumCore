@@ -23,6 +23,8 @@ Required scopes:
 - write routes: `proofs:write`
 - read routes for proof/circuit status: `proofs:read`
 - read routes for audit/trust/attestation: `audit:read`
+- admin DLQ read routes: `ops:read`
+- admin DLQ mutation routes: `ops:write`
 
 ### Bank Handshake (submit routes)
 
@@ -155,6 +157,7 @@ Response:
 ## v6 Supporting Surface
 
 - Prover: `POST /v6/proofs/batch`, `GET /v6/proofs/{proof_id}`, `GET /v6/proofs`
+- Prover admin ops: `GET /v6/ops/dlq`, `POST /v6/ops/dlq/{dlq_id}/requeue`
 - Verifier: `POST /v6/verify`, `GET /v6/circuits`, `GET /v6/audit/verify-chain`, `GET /v6/trust-speed`
 
 ## v6 Error Codes

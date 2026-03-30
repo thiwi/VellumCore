@@ -36,6 +36,10 @@ from vellum_core.run_contract import EvidenceInlineV6, EvidenceRefV6
 from vellum_core.schemas import (
     DEFAULT_BATCH_CIRCUIT_ID,
     BatchProveRequest,
+    DeadLetterItem,
+    DeadLetterListResponse,
+    DeadLetterRequeueRequest,
+    DeadLetterRequeueResponse,
     HealthResponse,
     ProofStatusResponse,
     ProveAcceptedResponse,
@@ -281,6 +285,25 @@ def _normalize_lifecycle_state(status: str) -> Literal["queued", "running", "com
     return "failed"
 
 
+def _dead_letter_item(row: Any) -> DeadLetterItem:
+    return DeadLetterItem(
+        id=int(row.id),
+        proof_id=str(row.proof_id),
+        circuit_id=str(row.circuit_id),
+        status=str(row.status),
+        error_class=str(row.error_class),
+        retryable=bool(row.retryable),
+        failure_reason=str(row.failure_reason),
+        error_message=str(row.error_message),
+        attempt_count=int(row.attempt_count),
+        max_attempts=int(row.max_attempts),
+        rerun_proof_id=str(row.rerun_proof_id) if row.rerun_proof_id else None,
+        triage_details=dict(row.triage_details or {}),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 async def _persist_and_enqueue_job(
     *,
     proof_id: str,
@@ -486,6 +509,138 @@ async def list_proofs(
             "limit": limit,
         },
     }
+
+
+@app.get(f"{HTTP_API_PREFIX}/ops/dlq", response_model=DeadLetterListResponse)
+async def list_dead_letter_jobs(
+    _: dict[str, Any] = Depends(require_jwt_with_scopes("ops:read")),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> DeadLetterListResponse:
+    rows = await db.list_dead_letter_jobs(status=status, limit=limit)
+    items = [_dead_letter_item(row) for row in rows]
+    return DeadLetterListResponse(
+        items=items,
+        count=len(items),
+        filters={"status": status, "limit": limit},
+    )
+
+
+@app.post(
+    f"{HTTP_API_PREFIX}/ops/dlq/{{dlq_id}}/requeue",
+    response_model=DeadLetterRequeueResponse,
+)
+async def requeue_dead_letter_job(
+    dlq_id: int,
+    payload: DeadLetterRequeueRequest,
+    claims: dict[str, Any] = Depends(require_jwt_with_scopes("ops:write")),
+) -> DeadLetterRequeueResponse:
+    row = await db.get_dead_letter_job(dlq_id=dlq_id)
+    if row is None:
+        raise APIError(
+            status_code=404,
+            code="unknown_dlq_entry",
+            message="No dead-letter entry found for id",
+            details={"dlq_id": dlq_id},
+        )
+
+    if isinstance(row.rerun_proof_id, str) and row.rerun_proof_id:
+        return DeadLetterRequeueResponse(
+            dlq_id=dlq_id,
+            source_proof_id=row.proof_id,
+            rerun_proof_id=row.rerun_proof_id,
+            status="already_requeued",
+        )
+
+    if not row.sealed_rerun_payload:
+        raise APIError(
+            status_code=409,
+            code="rerun_payload_unavailable",
+            message="Dead-letter entry cannot be requeued without sealed payload",
+            details={"dlq_id": dlq_id},
+        )
+
+    source_job = await db.get_proof_job(row.proof_id)
+    source_mode = "rerun"
+    input_fingerprint = compute_input_fingerprint(
+        source_mode=source_mode,
+        payload={"rerun_of": row.proof_id, "dlq_entry_id": dlq_id},
+    )
+    input_summary = build_input_summary(
+        source_mode=source_mode,
+        payload={"rerun_of": row.proof_id},
+        circuit_id=row.circuit_id,
+    )
+    metadata: dict[str, Any] = {
+        "source_mode": source_mode,
+        "rerun_of": row.proof_id,
+        "dlq_entry_id": dlq_id,
+    }
+    if source_job is not None:
+        metadata.update(dict(source_job.meta or {}))
+        source_mode = str(metadata.get("source_mode") or source_mode)
+        metadata["source_mode"] = source_mode
+        input_fingerprint = source_job.input_fingerprint or input_fingerprint
+        input_summary = dict(source_job.input_summary or input_summary)
+
+    actor = str(claims.get("sub") or "ops")
+    metadata.update(
+        {
+            "rerun_of": row.proof_id,
+            "dlq_entry_id": dlq_id,
+            "rerun_requested_by": actor,
+            "rerun_reason": payload.reason,
+        }
+    )
+
+    rerun_proof_id = str(uuid4())
+    await db.create_proof_job(
+        proof_id=rerun_proof_id,
+        circuit_id=row.circuit_id,
+        status="queued",
+        sealed_job_payload=row.sealed_rerun_payload,
+        input_fingerprint=input_fingerprint,
+        input_summary=input_summary,
+        metadata=metadata,
+    )
+
+    await audit_store.append_event(
+        proof_id=rerun_proof_id,
+        circuit_id=row.circuit_id,
+        status="queued",
+        public_signals=[],
+        metadata=metadata,
+    )
+    await audit_store.append_event(
+        proof_id=row.proof_id,
+        circuit_id=row.circuit_id,
+        status="rerun_triggered",
+        public_signals=[],
+        metadata={
+            "dlq_entry_id": dlq_id,
+            "rerun_proof_id": rerun_proof_id,
+            "rerun_requested_by": actor,
+            "rerun_reason": payload.reason,
+        },
+    )
+    await framework.job_backend.enqueue(
+        task_name="worker.process_proof_job",
+        args=[rerun_proof_id],
+        queue=settings.celery_queue,
+    )
+    await db.mark_dead_letter_job_requeued(
+        dlq_id=dlq_id,
+        rerun_proof_id=rerun_proof_id,
+        requested_by=actor,
+        reason=payload.reason,
+    )
+
+    return DeadLetterRequeueResponse(
+        dlq_id=dlq_id,
+        source_proof_id=row.proof_id,
+        rerun_proof_id=rerun_proof_id,
+        status="queued",
+    )
 
 
 @app.post(f"{HTTP_API_PREFIX}/runs", status_code=202, response_model=RunCreateAcceptedResponseV6)

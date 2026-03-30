@@ -169,6 +169,48 @@ class RunStatusResponseV6(BaseModel):
     updated_at: datetime
 
 
+class DeadLetterItem(BaseModel):
+    """Dead-letter row exposed through admin operations API."""
+
+    id: int
+    proof_id: str
+    circuit_id: str
+    status: str
+    error_class: str
+    retryable: bool
+    failure_reason: str
+    error_message: str
+    attempt_count: int
+    max_attempts: int
+    rerun_proof_id: str | None = None
+    triage_details: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class DeadLetterListResponse(BaseModel):
+    """List payload for dead-letter admin endpoint."""
+
+    items: list[DeadLetterItem]
+    count: int
+    filters: dict[str, Any]
+
+
+class DeadLetterRequeueRequest(BaseModel):
+    """Admin payload for requeueing one dead-letter row."""
+
+    reason: str | None = None
+
+
+class DeadLetterRequeueResponse(BaseModel):
+    """Result payload for one dead-letter requeue action."""
+
+    dlq_id: int
+    source_proof_id: str
+    rerun_proof_id: str
+    status: str
+
+
 class PolicyDescriptorV6(BaseModel):
     """Policy descriptor embedded in v6 attestation responses."""
 
@@ -197,6 +239,10 @@ __all__ = [
     "BatchProveRequest",
     "CircuitArtifactStatus",
     "CircuitManifest",
+    "DeadLetterItem",
+    "DeadLetterListResponse",
+    "DeadLetterRequeueRequest",
+    "DeadLetterRequeueResponse",
     "CircuitsResponse",
     "DEFAULT_BATCH_CIRCUIT_ID",
     "HealthResponse",

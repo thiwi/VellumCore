@@ -23,9 +23,13 @@ The framework is provider-oriented and circuit-manifest-driven. Circuits are dis
 - **Worker (Celery)**
   - fetches queued jobs
   - normalizes/validates inputs
-  - generates proofs with configured provider (`SnarkJSProvider` or `GrpcProofProvider`)
-  - optional shadow-compare mode (`ShadowProofProvider`) for backend migration
+  - generates proofs through `GrpcProofProvider` (native-prover backend)
+  - classifies terminal failures and persists DLQ rows for triage/re-run
   - persists outputs and audit events
+- **Maintenance Worker**
+  - runs periodic retention/archival cycles
+  - prunes aged terminal runtime payload data
+  - archives aged proof/evidence files into `PROOF_OUTPUT_DIR/archive`
 - **Verifier API (FastAPI)**
   - verifies submitted proof/public signals
   - exposes trust-speed, circuits, and audit-chain endpoints
@@ -81,9 +85,10 @@ Quality gates:
 - `vellum_core.spi`: extension protocols (provider, artifact store, signer, job backend)
 - `vellum_core.spi`: plus `EvidenceStore` and `AttestationSigner`
 - `vellum_core.runtime`: default runtime wiring
-- `vellum_core.providers`: proof provider implementations (`snarkjs`, `grpc`, shadow wrapper)
+- `vellum_core.providers`: proof provider implementations (`snarkjs`, `grpc`, shadow wrapper; runtime is grpc-only)
 - `vellum_core.policy_compiler`: YAML DSL compiler (`policy_spec.yaml -> Python + Circom`)
 - `vellum_core.cutover_gate`: deterministic gate logic for grpc cutover readiness
+- `vellum_core.maintenance`: retention + archival lifecycle routines
 - `vellum_core.registry`: circuit discovery + artifact path resolution
 - `vellum_core.logic.batcher`: batch pre-processing invariants
 - `vellum_core.auth`: JWT and bank-handshake validation

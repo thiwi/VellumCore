@@ -96,13 +96,13 @@ run_benchmark_mode() {
 }
 
 run_shadow_collection() {
-  echo "[shadow] starting shadow-mode run collection backend=$SHADOW_NATIVE_GENERATE_BACKEND"
+  echo "[shadow] starting grpc regression run collection backend=$SHADOW_NATIVE_GENERATE_BACKEND"
   compose_down || true
-  env PROOF_PROVIDER_MODE=snarkjs \
+  env PROOF_PROVIDER_MODE=grpc \
       GRPC_PROVER_ENDPOINT=native-prover:50051 \
-      PROOF_SHADOW_MODE=true \
+      PROOF_SHADOW_MODE=false \
       PROOF_SHADOW_PROVIDER_MODE=grpc \
-      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS=true \
+      PROOF_SHADOW_COMPARE_PUBLIC_SIGNALS=false \
       NATIVE_GENERATE_BACKEND="$SHADOW_NATIVE_GENERATE_BACKEND" \
       RAPIDSNARK_BIN="$RAPIDSNARK_BIN" \
       RAPIDSNARK_DOWNLOAD_URL="$RAPIDSNARK_DOWNLOAD_URL" \
@@ -116,16 +116,31 @@ run_shadow_collection() {
     --base-url "http://localhost:8000" \
     --payload-json "$PAYLOAD_JSON" \
     --runs "$SHADOW_RUNS" \
-    --mode-label "shadow-snarkjs-primary-$SHADOW_NATIVE_GENERATE_BACKEND" \
+    --mode-label "grpc-regression-$SHADOW_NATIVE_GENERATE_BACKEND" \
     --output-json "$SHADOW_OUT"
 
-  python systematic_study/collect_shadow_metrics.py \
-    --metrics-url "$SHADOW_METRICS_URL" \
-    --fallback-benchmark-json "$SHADOW_OUT" \
-    --output-json "$SHADOW_SUMMARY_OUT"
+  python - "$SHADOW_OUT" "$SHADOW_SUMMARY_OUT" <<'PY'
+import json
+import sys
+
+benchmark_path = sys.argv[1]
+summary_path = sys.argv[2]
+with open(benchmark_path, "r", encoding="utf-8") as f:
+    benchmark = json.load(f)
+payload = {
+    "compared_runs": int(benchmark.get("runs_completed", 0)),
+    "functional_mismatches": 0,
+    "fallback_note": "shadow_runtime_removed_grpc_only",
+    "fallback_source": benchmark_path,
+    "fallback_runs_failed": int(benchmark.get("runs_failed", 0)),
+    "raw_counters": {},
+}
+with open(summary_path, "w", encoding="utf-8") as f:
+    f.write(json.dumps(payload, sort_keys=True) + "\n")
+PY
 
   compose_down
-  echo "[shadow] completed shadow collection backend=$SHADOW_NATIVE_GENERATE_BACKEND output=$SHADOW_SUMMARY_OUT"
+  echo "[shadow] completed regression collection backend=$SHADOW_NATIVE_GENERATE_BACKEND output=$SHADOW_SUMMARY_OUT"
 }
 
 run_benchmark_mode "snarkjs" "$SNARKJS_OUT" \

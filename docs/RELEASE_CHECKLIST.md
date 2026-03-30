@@ -29,6 +29,7 @@
 - [ ] Update `docs/DEVELOPMENT.md`
 - [ ] Update `docs/SECURITY.md`
 - [ ] Update `docs/TROUBLESHOOTING.md`
+- [ ] Update `docs/DLQ_LIFECYCLE.md` when failure, retention, or rerun behavior changes
 - [ ] Update `docs/SDK.md`
 - [ ] Update `docs/MIGRATIONS.md` and add/refresh version-specific migration docs when breaking changes occur
 - [ ] Update `docs/COMPATIBILITY.md`

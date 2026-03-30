@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     JSON,
     BigInteger,
     Column,
     DateTime,
+    Integer,
     Index,
     String,
     Text,
@@ -89,6 +91,37 @@ class SecurityEvent(Base):
     source_ip = Column(String(64), nullable=True)
     proof_id = Column(String(64), nullable=True)
     details = Column(JSON, nullable=False, default=dict)
+
+
+class DeadLetterJob(Base):
+    """Terminal failed job captured for ops triage and controlled reruns."""
+
+    __tablename__ = "dead_letter_jobs"
+    __table_args__ = (
+        Index("ix_dead_letter_jobs_status", "status"),
+        Index("ix_dead_letter_jobs_created_at", "created_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    proof_id = Column(String(64), nullable=False, unique=True)
+    circuit_id = Column(String(128), nullable=False)
+    error_class = Column(String(64), nullable=False)
+    retryable = Column(Boolean, nullable=False, default=False)
+    failure_reason = Column(String(64), nullable=False)
+    error_message = Column(Text, nullable=False)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=0)
+    triage_details = Column(JSON, nullable=False, default=dict)
+    job_metadata = Column(JSON, nullable=False, default=dict)
+    sealed_rerun_payload = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="open")
+    rerun_proof_id = Column(String(64), nullable=True)
+    rerun_requested_by = Column(String(128), nullable=True)
+    rerun_reason = Column(Text, nullable=True)
+    triaged_at = Column(DateTime(timezone=True), nullable=False)
+    requeued_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
 
 
 @dataclass(frozen=True)
@@ -323,6 +356,159 @@ class Database:
             await session.commit()
             await session.refresh(row)
             return row
+
+    async def upsert_dead_letter_job(
+        self,
+        *,
+        proof_id: str,
+        circuit_id: str,
+        error_class: str,
+        retryable: bool,
+        failure_reason: str,
+        error_message: str,
+        attempt_count: int,
+        max_attempts: int,
+        triage_details: dict[str, Any] | None = None,
+        job_metadata: dict[str, Any] | None = None,
+        sealed_rerun_payload: str | None = None,
+    ) -> DeadLetterJob:
+        """Create or update one dead-letter row keyed by source proof_id."""
+        now = _utc_now()
+        async with self.session_factory() as session:
+            query = select(DeadLetterJob).where(DeadLetterJob.proof_id == proof_id).limit(1)
+            result = await session.execute(query)
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = DeadLetterJob(
+                    proof_id=proof_id,
+                    circuit_id=circuit_id,
+                    error_class=error_class,
+                    retryable=retryable,
+                    failure_reason=failure_reason,
+                    error_message=error_message,
+                    attempt_count=attempt_count,
+                    max_attempts=max_attempts,
+                    triage_details=triage_details or {},
+                    job_metadata=job_metadata or {},
+                    sealed_rerun_payload=sealed_rerun_payload,
+                    status="open",
+                    triaged_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.circuit_id = circuit_id
+                row.error_class = error_class
+                row.retryable = retryable
+                row.failure_reason = failure_reason
+                row.error_message = error_message
+                row.attempt_count = attempt_count
+                row.max_attempts = max_attempts
+                row.triage_details = triage_details or {}
+                row.job_metadata = job_metadata or {}
+                if sealed_rerun_payload:
+                    row.sealed_rerun_payload = sealed_rerun_payload
+                row.status = "open"
+                row.triaged_at = now
+                row.updated_at = now
+            await session.commit()
+            await session.refresh(row)
+            return row
+
+    async def get_dead_letter_job(self, *, dlq_id: int) -> DeadLetterJob | None:
+        """Return one dead-letter row by id."""
+        async with self.session_factory() as session:
+            return await session.get(DeadLetterJob, dlq_id)
+
+    async def list_dead_letter_jobs(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[DeadLetterJob]:
+        """List newest dead-letter rows with optional status filter."""
+        bounded_limit = min(max(limit, 1), 200)
+        async with self.session_factory() as session:
+            query = select(DeadLetterJob)
+            if status is not None:
+                query = query.where(DeadLetterJob.status == status)
+            query = query.order_by(desc(DeadLetterJob.created_at)).limit(bounded_limit)
+            result = await session.execute(query)
+            return list(result.scalars().all())
+
+    async def mark_dead_letter_job_requeued(
+        self,
+        *,
+        dlq_id: int,
+        rerun_proof_id: str,
+        requested_by: str,
+        reason: str | None,
+    ) -> DeadLetterJob | None:
+        """Mark dead-letter row as requeued with idempotent target run id."""
+        now = _utc_now()
+        async with self.session_factory() as session:
+            row = await session.get(DeadLetterJob, dlq_id)
+            if row is None:
+                return None
+            row.status = "requeued"
+            row.rerun_proof_id = rerun_proof_id
+            row.rerun_requested_by = requested_by
+            row.rerun_reason = reason
+            row.requeued_at = now
+            row.updated_at = now
+            await session.commit()
+            await session.refresh(row)
+            return row
+
+    async def prune_terminal_job_runtime_data(
+        self,
+        *,
+        older_than: datetime,
+    ) -> int:
+        """Strip heavy runtime result columns for terminal jobs older than cutoff."""
+        async with self.session_factory() as session:
+            query = select(ProofJob).where(
+                ProofJob.status.in_(("completed", "failed")),
+                ProofJob.updated_at < older_than,
+                (
+                    (ProofJob.proof.is_not(None))
+                    | (ProofJob.public_signals.is_not(None))
+                    | (ProofJob.error.is_not(None))
+                ),
+            )
+            result = await session.execute(query)
+            rows = list(result.scalars().all())
+            now = _utc_now()
+            for row in rows:
+                row.proof = None
+                row.public_signals = None
+                row.error = None
+                row.updated_at = now
+            await session.commit()
+            return len(rows)
+
+    async def list_jobs_for_file_archival(
+        self,
+        *,
+        older_than: datetime,
+        limit: int = 500,
+    ) -> list[ProofJob]:
+        """List terminal jobs with proof file paths that should be archived."""
+        bounded_limit = min(max(limit, 1), 2000)
+        async with self.session_factory() as session:
+            query = (
+                select(ProofJob)
+                .where(
+                    ProofJob.status.in_(("completed", "failed")),
+                    ProofJob.proof_path.is_not(None),
+                    ProofJob.updated_at < older_than,
+                )
+                .order_by(ProofJob.updated_at.asc())
+                .limit(bounded_limit)
+            )
+            result = await session.execute(query)
+            return list(result.scalars().all())
 
 
 def _utc_now() -> datetime:

@@ -175,6 +175,5 @@ def _build_provider(*, settings: Settings, registry: CircuitRegistry) -> ZKProvi
     runtime_config = ProofProviderRuntimeConfig.from_settings(settings)
     return build_proof_provider(
         registry=registry,
-        snarkjs_bin=settings.snarkjs_bin,
         config=runtime_config,
     )

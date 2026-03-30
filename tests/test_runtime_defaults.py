@@ -36,9 +36,7 @@ def _write_manifest(circuits_dir: Path, *, circuit_id: str) -> None:
 def _make_settings(
     tmp_path: Path,
     *,
-    proof_provider_mode: str = "snarkjs",
-    proof_shadow_mode: bool = False,
-    proof_shadow_provider_mode: str = "grpc",
+    proof_provider_mode: str = "grpc",
 ) -> Settings:
     return Settings(
         app_name="vellum-core",
@@ -81,8 +79,8 @@ def _make_settings(
         proof_provider_mode=proof_provider_mode,
         grpc_prover_endpoint="127.0.0.1:50051",
         grpc_prover_timeout_seconds=30.0,
-        proof_shadow_mode=proof_shadow_mode,
-        proof_shadow_provider_mode=proof_shadow_provider_mode,
+        proof_shadow_mode=False,
+        proof_shadow_provider_mode="grpc",
         proof_shadow_compare_public_signals=True,
     )
 
@@ -161,7 +159,7 @@ def test_build_framework_client_wires_dependencies(tmp_path: Path) -> None:
     client = defaults.build_framework_client(settings)
     assert client.config.app_name == "vellum-core"
     assert client.config.celery_queue == "vellum-queue"
-    assert isinstance(client.provider, defaults.SnarkJSProvider)
+    assert isinstance(client.provider, defaults.GrpcProofProvider)
     assert isinstance(client.artifact_store, defaults.FilesystemArtifactStore)
     assert isinstance(client.signer, defaults.VaultSigner)
     assert isinstance(client.evidence_store, defaults.FilesystemEvidenceStore)
@@ -177,19 +175,12 @@ def test_build_provider_uses_grpc_mode(tmp_path: Path) -> None:
     assert isinstance(provider, defaults.GrpcProofProvider)
 
 
-def test_build_provider_wraps_shadow_mode(tmp_path: Path) -> None:
-    settings = _make_settings(
-        tmp_path,
-        proof_provider_mode="snarkjs",
-        proof_shadow_mode=True,
-        proof_shadow_provider_mode="grpc",
-    )
+def test_build_provider_is_grpc_only(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path, proof_provider_mode="grpc")
     _write_manifest(settings.circuits_dir, circuit_id="batch_credit_check")
     registry = CircuitRegistry(settings.circuits_dir, settings.shared_assets_dir)
     provider = defaults._build_provider(settings=settings, registry=registry)
-    assert isinstance(provider, defaults.ShadowProofProvider)
-    assert isinstance(provider.primary, defaults.SnarkJSProvider)
-    assert isinstance(provider.shadow, defaults.GrpcProofProvider)
+    assert isinstance(provider, defaults.GrpcProofProvider)
 
 
 def test_celery_app_module_builds_queue(monkeypatch: pytest.MonkeyPatch) -> None:
