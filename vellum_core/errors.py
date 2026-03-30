@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from vellum_core.api.errors import FrameworkError
@@ -26,7 +27,7 @@ class APIError(Exception):
             "error": {
                 "code": self.code,
                 "message": self.message,
-                "details": self.details,
+                "details": jsonable_encoder(self.details),
             }
         }
 
@@ -55,7 +56,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=422,
             code="validation_error",
             message="Request validation failed",
-            details={"errors": exc.errors()},
+            details={"errors": exc.errors(include_context=False, include_input=False)},
         )
         return JSONResponse(status_code=422, content=payload.to_payload())
 

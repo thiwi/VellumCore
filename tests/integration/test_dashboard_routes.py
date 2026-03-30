@@ -136,3 +136,14 @@ def test_demo_prove_rejects_batches_above_max_size() -> None:
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.integration
+def test_demo_prove_rejects_mixed_input_modes() -> None:
+    client = TestClient(dashboard_service.app)
+    response = client.post(
+        "/api/demo/prove",
+        json={"balances": [10], "limits": [1], "private_input": {"x": 1}},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"

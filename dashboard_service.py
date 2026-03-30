@@ -1269,7 +1269,7 @@ async def demo_prove(request: Request) -> dict[str, Any]:
             status_code=422,
             code="validation_error",
             message="Request validation failed",
-            details={"errors": exc.errors()},
+            details={"errors": exc.errors(include_context=False, include_input=False)},
         ) from exc
 
     body = payload.model_dump_json(exclude_none=True).encode("utf-8")
