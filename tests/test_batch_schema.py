@@ -97,4 +97,4 @@ def test_batch_schema_rejects_private_input_mixed_with_direct_mode() -> None:
 
 def test_batch_schema_rejects_source_ref_field() -> None:
     with pytest.raises(ValidationError):
-        BatchProveRequest.model_validate({"source_ref": "legacy://batch/42"})
+        BatchProveRequest.model_validate({"source_ref": "deprecated://batch/42"})

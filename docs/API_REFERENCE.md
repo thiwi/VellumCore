@@ -41,7 +41,7 @@ Canonical signature string:
 
 - v6 request/response schemas are guarded by snapshot-backed contract tests (`pytest -m contract`).
 - Security-sensitive behavior is guarded by regression tests (`pytest -m security`).
-- Legacy v1 and v5 HTTP routes have been removed in v6.
+- v1 and v5 HTTP routes have been removed in v6.
 
 ## v6 Primary Surface
 

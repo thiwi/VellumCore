@@ -18,7 +18,7 @@
 
 ### Changed
 
-- Removed legacy v1 and v5 HTTP route surfaces from reference services.
+- Removed v1 and v5 HTTP route surfaces from reference services.
 - Migrated supporting service routes to v6 namespace:
   - Prover proof routes now under `/v6/proofs/*`
   - Verifier verification/ops routes now under `/v6/*`

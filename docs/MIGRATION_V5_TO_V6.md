@@ -1,6 +1,6 @@
 # Migration: v5 to v6
 
-v6 introduces a resource-oriented run surface and removes legacy v1/v5 HTTP routes.
+v6 introduces a resource-oriented run surface and removes v1/v5 HTTP routes.
 
 ## Breaking changes summary
 

@@ -1,6 +1,6 @@
 # Migration: v4 to v5
 
-v5 introduces policy-centric primary APIs while keeping v1 endpoints in legacy mode.
+v5 introduces policy-centric primary APIs while keeping v1 endpoints as transitional compatibility routes.
 
 ## What changed
 
@@ -16,7 +16,7 @@ v5 introduces policy-centric primary APIs while keeping v1 endpoints in legacy m
   - `EvidenceStore`
   - `AttestationSigner`
 
-## Legacy status of v1
+## Transitional status of v1
 
 v1 endpoints continue to work, but now return deprecation metadata headers:
 
