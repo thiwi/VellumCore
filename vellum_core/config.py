@@ -41,6 +41,11 @@ class Settings:
     jwt_leeway_seconds: int
     max_parallel_proofs: int
     submit_rate_limit_per_minute: int
+    max_submit_body_bytes: int
+    celery_task_soft_time_limit_seconds: int
+    celery_task_time_limit_seconds: int
+    celery_worker_max_tasks_per_child: int
+    proof_job_max_attempts: int
 
     security_profile: str
     metrics_require_auth: bool
@@ -116,6 +121,17 @@ class Settings:
             submit_rate_limit_per_minute=max(
                 0, int(os.getenv("SUBMIT_RATE_LIMIT_PER_MINUTE", "30"))
             ),
+            max_submit_body_bytes=max(1, int(os.getenv("MAX_SUBMIT_BODY_BYTES", "1048576"))),
+            celery_task_soft_time_limit_seconds=max(
+                1, int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT_SECONDS", "50"))
+            ),
+            celery_task_time_limit_seconds=max(
+                1, int(os.getenv("CELERY_TASK_TIME_LIMIT_SECONDS", "60"))
+            ),
+            celery_worker_max_tasks_per_child=max(
+                1, int(os.getenv("CELERY_WORKER_MAX_TASKS_PER_CHILD", "100"))
+            ),
+            proof_job_max_attempts=max(1, int(os.getenv("PROOF_JOB_MAX_ATTEMPTS", "3"))),
             security_profile=security_profile,
             metrics_require_auth=_parse_bool_env("METRICS_REQUIRE_AUTH", default=True),
             vellum_data_key=os.getenv("VELLUM_DATA_KEY", ""),
@@ -156,6 +172,20 @@ class Settings:
             raise ValueError("PROOF_SHADOW_PROVIDER_MODE must be one of: snarkjs, grpc")
         if self.grpc_prover_timeout_seconds <= 0:
             raise ValueError("GRPC_PROVER_TIMEOUT_SECONDS must be > 0")
+        if self.max_submit_body_bytes <= 0:
+            raise ValueError("MAX_SUBMIT_BODY_BYTES must be > 0")
+        if self.celery_task_soft_time_limit_seconds <= 0:
+            raise ValueError("CELERY_TASK_SOFT_TIME_LIMIT_SECONDS must be > 0")
+        if self.celery_task_time_limit_seconds <= 0:
+            raise ValueError("CELERY_TASK_TIME_LIMIT_SECONDS must be > 0")
+        if self.celery_task_time_limit_seconds < self.celery_task_soft_time_limit_seconds:
+            raise ValueError(
+                "CELERY_TASK_TIME_LIMIT_SECONDS must be >= CELERY_TASK_SOFT_TIME_LIMIT_SECONDS"
+            )
+        if self.celery_worker_max_tasks_per_child <= 0:
+            raise ValueError("CELERY_WORKER_MAX_TASKS_PER_CHILD must be > 0")
+        if self.proof_job_max_attempts <= 0:
+            raise ValueError("PROOF_JOB_MAX_ATTEMPTS must be > 0")
         if self.proof_provider_mode == "grpc" and self.grpc_cutover_gate_enforced:
             self._validate_grpc_cutover_gate()
         if not self.vellum_data_key:

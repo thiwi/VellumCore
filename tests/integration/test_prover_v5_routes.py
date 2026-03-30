@@ -245,3 +245,40 @@ def test_v5_policy_run_unknown_policy_returns_404(monkeypatch: pytest.MonkeyPatc
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "unknown_policy"
+
+
+@pytest.mark.integration
+def test_v1_batch_submit_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_SUBMIT_BODY_BYTES", "128")
+    prover_service = _load_prover_service(monkeypatch)
+    _patch_auth(monkeypatch, prover_service, required_scope="proofs:write")
+
+    client = TestClient(prover_service.app)
+    response = client.post(
+        "/v1/proofs/batch",
+        json={"balances": [1] * 200, "limits": [0] * 200},
+        headers={"Authorization": "Bearer demo"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "payload_too_large"
+
+
+@pytest.mark.integration
+def test_v1_batch_submit_rejects_private_input_schema_violation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prover_service = _load_prover_service(monkeypatch)
+    _patch_auth(monkeypatch, prover_service, required_scope="proofs:write")
+
+    client = TestClient(prover_service.app)
+    response = client.post(
+        "/v1/proofs/batch",
+        json={
+            "circuit_id": "credit_check",
+            "private_input": {"credit_score": -1, "debt_ratio": 10},
+        },
+        headers={"Authorization": "Bearer demo"},
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "invalid_private_input_schema"

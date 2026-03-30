@@ -66,6 +66,11 @@ def _make_settings(
         jwt_leeway_seconds=30,
         max_parallel_proofs=2,
         submit_rate_limit_per_minute=30,
+        max_submit_body_bytes=1_048_576,
+        celery_task_soft_time_limit_seconds=50,
+        celery_task_time_limit_seconds=60,
+        celery_worker_max_tasks_per_child=100,
+        proof_job_max_attempts=3,
         security_profile="strict",
         metrics_require_auth=True,
         vellum_data_key="vellum-data",
@@ -214,3 +219,9 @@ def test_celery_app_module_builds_queue(monkeypatch: pytest.MonkeyPatch) -> None
     assert module.celery_app.conf.task_default_queue == "test-q"
     routes = module.celery_app.conf.task_routes
     assert routes["worker.process_proof_job"]["queue"] == "test-q"
+    assert module.celery_app.conf.task_soft_time_limit == 50
+    assert module.celery_app.conf.task_time_limit == 60
+    assert module.celery_app.conf.task_acks_late is True
+    assert module.celery_app.conf.task_reject_on_worker_lost is True
+    assert module.celery_app.conf.worker_prefetch_multiplier == 1
+    assert module.celery_app.conf.worker_max_tasks_per_child == 100

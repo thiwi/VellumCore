@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_ready
 from prometheus_client import start_http_server
 
@@ -17,6 +18,8 @@ from vellum_core.celery_app import celery_app
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.logic.batcher import batch_prepare_from_private_input
+from vellum_core.logic.job_attempts import next_attempt_metadata
+from vellum_core.logic.private_input_schema import validate_private_input_schema
 from vellum_core.metrics import observe_proof_duration
 from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.policies.dual_track import (
@@ -94,7 +97,53 @@ async def _process_proof_job_async(proof_id: str) -> None:
         )
         return
 
-    await db.update_proof_job(proof_id=proof_id, status="running")
+    max_attempts = settings.proof_job_max_attempts
+    attempt_metadata, attempts_exceeded = next_attempt_metadata(
+        metadata=job.meta,
+        max_attempts=max_attempts,
+    )
+    attempt_count = attempt_metadata["attempt_count"]
+    if attempts_exceeded:
+        failure_reason = f"proof job exceeded max attempts ({max_attempts})"
+        failed_job = await db.update_proof_job(
+            proof_id=proof_id,
+            status="failed",
+            error=failure_reason,
+            metadata_patch={**attempt_metadata, "failure_reason": "max_attempts_exceeded"},
+        )
+        failed_metadata = dict((failed_job.meta if failed_job is not None else job.meta) or {})
+        failed_metadata.update(
+            {
+                **attempt_metadata,
+                "failure_reason": "max_attempts_exceeded",
+            }
+        )
+        await audit_store.append_event(
+            proof_id=proof_id,
+            circuit_id=job.circuit_id,
+            status="failed",
+            public_signals=[],
+            metadata=failed_metadata,
+            error=failure_reason,
+        )
+        await db.purge_sealed_job_payload(proof_id=proof_id)
+        logger.error(
+            "proof_job_max_attempts_exceeded",
+            extra={
+                "proof_id": proof_id,
+                "attempt_count": attempt_count,
+                "max_attempts": max_attempts,
+            },
+        )
+        return
+
+    updated_job = await db.update_proof_job(
+        proof_id=proof_id,
+        status="running",
+        metadata_patch=attempt_metadata,
+    )
+    if updated_job is not None:
+        job = updated_job
     await audit_store.append_event(
         proof_id=proof_id,
         circuit_id=job.circuit_id,
@@ -129,6 +178,13 @@ async def _process_proof_job_async(proof_id: str) -> None:
         if job.circuit_id == DEFAULT_BATCH_CIRCUIT_ID:
             prepared = batch_prepare_from_private_input(private_input)
             private_input = prepared.to_circuit_input()
+
+        manifest = framework.circuit_manager.registry.get_manifest(job.circuit_id)
+        validate_private_input_schema(
+            input_schema=manifest.input_schema,
+            private_input=private_input,
+        )
+
         result = await framework.proof_engine.generate(
             ProofGenerationRequest(circuit_id=job.circuit_id, private_input=private_input)
         )
@@ -228,13 +284,29 @@ async def _process_proof_job_async(proof_id: str) -> None:
                 "proof_id": proof_id,
                 "circuit_id": job.circuit_id,
                 "proof_path": str(proof_path),
+                "attempt_count": attempt_count,
             },
         )
-    except Exception as exc:
-        await db.update_proof_job(
+    except SoftTimeLimitExceeded as exc:
+        timeout_error = (
+            "proof job exceeded celery soft time limit "
+            f"({settings.celery_task_soft_time_limit_seconds}s)"
+        )
+        failed_job = await db.update_proof_job(
             proof_id=proof_id,
             status="failed",
-            error=str(exc),
+            error=timeout_error,
+            metadata_patch={
+                "failure_reason": "soft_time_limit_exceeded",
+                **attempt_metadata,
+            },
+        )
+        failed_metadata = dict((failed_job.meta if failed_job is not None else job.meta) or {})
+        failed_metadata.update(
+            {
+                "failure_reason": "soft_time_limit_exceeded",
+                **attempt_metadata,
+            }
         )
         await db.purge_sealed_job_payload(proof_id=proof_id)
         await audit_store.append_event(
@@ -242,12 +314,51 @@ async def _process_proof_job_async(proof_id: str) -> None:
             circuit_id=job.circuit_id,
             status="failed",
             public_signals=[],
-            metadata=job.meta,
+            metadata=failed_metadata,
+            error=timeout_error,
+        )
+        logger.exception(
+            "proof_job_soft_time_limit_exceeded",
+            extra={
+                "proof_id": proof_id,
+                "circuit_id": job.circuit_id,
+                "attempt_count": attempt_count,
+            },
+        )
+        raise
+    except Exception as exc:
+        failed_job = await db.update_proof_job(
+            proof_id=proof_id,
+            status="failed",
+            error=str(exc),
+            metadata_patch={
+                "failure_reason": "runtime_exception",
+                **attempt_metadata,
+            },
+        )
+        await db.purge_sealed_job_payload(proof_id=proof_id)
+        failed_metadata = dict((failed_job.meta if failed_job is not None else job.meta) or {})
+        failed_metadata.update(
+            {
+                "failure_reason": "runtime_exception",
+                **attempt_metadata,
+            }
+        )
+        await audit_store.append_event(
+            proof_id=proof_id,
+            circuit_id=job.circuit_id,
+            status="failed",
+            public_signals=[],
+            metadata=failed_metadata,
             error=str(exc),
         )
         logger.exception(
             "proof_job_failed",
-            extra={"proof_id": proof_id, "circuit_id": job.circuit_id},
+            extra={
+                "proof_id": proof_id,
+                "circuit_id": job.circuit_id,
+                "attempt_count": attempt_count,
+            },
         )
         raise
     finally:

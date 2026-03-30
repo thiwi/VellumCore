@@ -22,6 +22,8 @@ Validation checks:
 - Signature key is resolved through `BANK_KEY_MAPPING_JSON`.
 - Nonces are checked/stored in Redis with expiry (`NONCE_WINDOW_SECONDS`).
 - Submit requests are rate-limited in Redis (`SUBMIT_RATE_LIMIT_PER_MINUTE`).
+- Submit request bodies are size-limited (`MAX_SUBMIT_BODY_BYTES`).
+- Dashboard demo proxy body is size-limited (`DASHBOARD_MAX_DEMO_PROVE_BODY_BYTES`).
 
 ## Audit Integrity
 
@@ -38,6 +40,7 @@ Every key lifecycle event is appended to `audit_log` with signature and hash cha
 - Use short JWT TTL and rotate signing keys regularly.
 - Protect Redis and Postgres with network policy and credentials.
 - Monitor repeated `nonce_replay`, `invalid_token`, and `invalid_handshake_signature` errors.
+- Monitor `payload_too_large` and `invalid_private_input_schema` spikes as potential DoS probing.
 
 ## Sensitive Data Handling
 

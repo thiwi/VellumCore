@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import dashboard_service
+from vellum_core.logic.batcher import MAX_BATCH_SIZE
 
 
 @pytest.mark.integration
@@ -109,3 +110,29 @@ def test_demo_list_proofs_route(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["filters"]["status"] == "running"
     assert body["filters"]["circuit_id"] == "batch_credit_check"
     assert body["filters"]["limit"] == 25
+
+
+@pytest.mark.integration
+def test_demo_prove_rejects_payload_too_large(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard_service.config, "dashboard_max_demo_prove_body_bytes", 128)
+    client = TestClient(dashboard_service.app)
+    response = client.post(
+        "/api/demo/prove",
+        json={"balances": [1] * 200, "limits": [0] * 200},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "payload_too_large"
+
+
+@pytest.mark.integration
+def test_demo_prove_rejects_batches_above_max_size() -> None:
+    client = TestClient(dashboard_service.app)
+    response = client.post(
+        "/api/demo/prove",
+        json={
+            "balances": [1 for _ in range(MAX_BATCH_SIZE + 1)],
+            "limits": [0 for _ in range(MAX_BATCH_SIZE + 1)],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"

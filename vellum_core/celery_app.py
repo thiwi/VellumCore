@@ -17,4 +17,10 @@ celery_app = Celery(
 celery_app.conf.update(
     task_default_queue=settings.celery_queue,
     task_routes={"worker.process_proof_job": {"queue": settings.celery_queue}},
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    worker_prefetch_multiplier=1,
+    task_soft_time_limit=settings.celery_task_soft_time_limit_seconds,
+    task_time_limit=settings.celery_task_time_limit_seconds,
+    worker_max_tasks_per_child=settings.celery_worker_max_tasks_per_child,
 )
