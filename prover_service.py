@@ -18,11 +18,13 @@ from vellum_core.database import Database
 from vellum_core.errors import APIError, register_exception_handlers
 from vellum_core.http_legacy import mark_legacy_api
 from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
+from vellum_core.logic.private_input_schema import validate_private_input_schema
 from vellum_core.metrics import prometheus_payload
 from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.policies.dual_track import prepare_reference_track
 from vellum_core.policy_registry import PolicyManifestError, PolicyNotFoundError
 from vellum_core.proof_store import VellumAuditStore
+from vellum_core.registry import CircuitNotFoundError
 from vellum_core.runtime import build_framework_client
 from vellum_core.security import (
     SecurityEventLogger,
@@ -129,6 +131,7 @@ async def _decode_and_authenticate_payload(
 ) -> tuple[PayloadModel, str]:
     """Verify bank handshake and parse payload into one Pydantic model."""
     raw_body = await request.body()
+    _enforce_submit_body_size(raw_body=raw_body, path=request.url.path)
     bank_key_id = await auth_manager.verify_handshake(request, raw_body)
     try:
         payload = payload_model.model_validate_json(raw_body)
@@ -140,6 +143,52 @@ async def _decode_and_authenticate_payload(
             details={"reason": str(exc)},
         ) from exc
     return payload, bank_key_id
+
+
+def _enforce_submit_body_size(*, raw_body: bytes, path: str) -> None:
+    """Reject oversized submit payloads before auth/model decoding work."""
+    if len(raw_body) <= settings.max_submit_body_bytes:
+        return
+    raise APIError(
+        status_code=413,
+        code="payload_too_large",
+        message="Request payload exceeds configured size limit",
+        details={
+            "path": path,
+            "limit_bytes": settings.max_submit_body_bytes,
+            "received_bytes": len(raw_body),
+        },
+    )
+
+
+def _validate_private_input_schema_or_raise(
+    *,
+    circuit_id: str,
+    private_input: dict[str, Any],
+) -> None:
+    """Validate private_input against the selected circuit's manifest schema."""
+    try:
+        manifest = framework.circuit_manager.registry.get_manifest(circuit_id)
+    except CircuitNotFoundError as exc:
+        raise APIError(
+            status_code=404,
+            code="unknown_circuit",
+            message="Circuit id not found",
+            details={"circuit_id": circuit_id},
+        ) from exc
+
+    try:
+        validate_private_input_schema(
+            input_schema=manifest.input_schema,
+            private_input=private_input,
+        )
+    except ValueError as exc:
+        raise APIError(
+            status_code=422,
+            code="invalid_private_input_schema",
+            message="private_input does not satisfy circuit input_schema",
+            details={"circuit_id": circuit_id, "reason": str(exc)},
+        ) from exc
 
 
 async def _decode_and_authenticate_policy(request: Request) -> tuple[PolicyRunRequest, str]:
@@ -324,6 +373,12 @@ async def create_batch_proof(
             ) from exc
         private_input = prepared.to_circuit_input()
 
+    assert private_input is not None
+    _validate_private_input_schema_or_raise(
+        circuit_id=circuit_id,
+        private_input=private_input,
+    )
+
     metadata: dict[str, Any] = {
         "mode": "batch",
         "request_id": payload.request_id,
@@ -479,6 +534,10 @@ async def create_policy_run(
     )
 
     request_payload = payload.model_dump()
+    _validate_private_input_schema_or_raise(
+        circuit_id=policy_manifest.circuit_id,
+        private_input=reference_result.private_input,
+    )
     sealed_payload = await seal_job_payload(
         vault_client=vault_client,
         key_name=settings.vellum_data_key,

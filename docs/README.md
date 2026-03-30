@@ -9,12 +9,13 @@ integrators, and contributors.
 2. [API Reference](API_REFERENCE.md)
 3. [Configuration](CONFIGURATION.md)
 4. [Policy Packs](POLICY_PACKS.md)
-5. [Operations Runbook](OPERATIONS.md)
-6. [Development Guide](DEVELOPMENT.md)
-7. [Provider Cutover Gate](CUTOVER.md)
-8. [CI and Quality Gates](CI.md)
-9. [Security Model](SECURITY.md)
-10. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
+5. [Circuit YAML Guide](CIRCUIT_YAML_GUIDE.md)
+6. [Operations Runbook](OPERATIONS.md)
+7. [Development Guide](DEVELOPMENT.md)
+8. [Provider Cutover Gate](CUTOVER.md)
+9. [CI and Quality Gates](CI.md)
+10. [Security Model](SECURITY.md)
+11. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
 
 ## Existing Policy Docs
 

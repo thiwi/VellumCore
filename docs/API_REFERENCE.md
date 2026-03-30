@@ -156,6 +156,8 @@ Common v5 domain errors:
 - `invalid_evidence_ref`
 - `unknown_attestation_id`
 - `attestation_not_ready`
+- `payload_too_large` (HTTP 413 when request body exceeds configured limit)
+- `invalid_private_input_schema` (HTTP 422 when `private_input` violates circuit `input_schema`)
 
 ## v1 Legacy Surface
 

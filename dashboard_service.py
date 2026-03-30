@@ -14,9 +14,9 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 try:
     from vellum_core.auth import VaultJWTSigner, build_canonical_request_string
@@ -54,6 +54,7 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency for lightw
         return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
 
 from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.logic.batcher import MAX_BATCH_SIZE
 from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.vault import VaultTransitClient
 
@@ -61,10 +62,36 @@ from vellum_core.vault import VaultTransitClient
 class DemoBatchProveRequest(BaseModel):
     """Request model forwarded to prover demo submit endpoint."""
 
+    model_config = ConfigDict(extra="forbid")
+
     circuit_id: str | None = None
-    balances: list[int] | None = None
-    limits: list[int] | None = None
+    balances: list[int] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_BATCH_SIZE,
+    )
+    limits: list[int] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_BATCH_SIZE,
+    )
     private_input: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_input_mode(self) -> "DemoBatchProveRequest":
+        using_balances_limits = self.balances is not None or self.limits is not None
+        using_private_input = self.private_input is not None
+        modes = int(using_balances_limits) + int(using_private_input)
+        if modes != 1:
+            raise ValueError(
+                "Provide exactly one input mode: balances/limits or private_input"
+            )
+        if using_balances_limits:
+            if self.balances is None or self.limits is None:
+                raise ValueError("balances and limits must both be provided for direct mode")
+            if len(self.balances) != len(self.limits):
+                raise ValueError("balances and limits length mismatch")
+        return self
 
 
 class DemoVerifyRequest(BaseModel):
@@ -108,6 +135,10 @@ class DashboardConfig:
         self.redis_port = int(os.getenv("REDIS_PORT", "6379"))
         self.postgres_host = os.getenv("POSTGRES_HOST", "postgres")
         self.postgres_port = int(os.getenv("POSTGRES_PORT", "5432"))
+        self.dashboard_max_demo_prove_body_bytes = max(
+            1,
+            int(os.getenv("DASHBOARD_MAX_DEMO_PROVE_BODY_BYTES", "1048576")),
+        )
 
 
 config = DashboardConfig()
@@ -1216,8 +1247,31 @@ async def framework_audit_chain() -> dict[str, Any]:
 
 
 @app.post("/api/demo/prove")
-async def demo_prove(payload: DemoBatchProveRequest) -> dict[str, Any]:
+async def demo_prove(request: Request) -> dict[str, Any]:
     """Proxy prove submission with dashboard-minted auth and handshake headers."""
+    raw_body = await request.body()
+    if len(raw_body) > config.dashboard_max_demo_prove_body_bytes:
+        raise APIError(
+            status_code=413,
+            code="payload_too_large",
+            message="Request payload exceeds configured size limit",
+            details={
+                "path": "/api/demo/prove",
+                "limit_bytes": config.dashboard_max_demo_prove_body_bytes,
+                "received_bytes": len(raw_body),
+            },
+        )
+
+    try:
+        payload = DemoBatchProveRequest.model_validate_json(raw_body)
+    except ValidationError as exc:
+        raise APIError(
+            status_code=422,
+            code="validation_error",
+            message="Request validation failed",
+            details={"errors": exc.errors()},
+        ) from exc
+
     body = payload.model_dump_json(exclude_none=True).encode("utf-8")
     token = await _jwt_token()
     path = "/v1/proofs/batch"
