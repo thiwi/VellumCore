@@ -287,7 +287,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
                 "attempt_count": attempt_count,
             },
         )
-    except SoftTimeLimitExceeded as exc:
+    except SoftTimeLimitExceeded:
         timeout_error = (
             "proof job exceeded celery soft time limit "
             f"({settings.celery_task_soft_time_limit_seconds}s)"
