@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Query, Request
@@ -16,7 +16,7 @@ from vellum_core.auth import AuthManager, BEARER_SCHEME
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.errors import APIError, register_exception_handlers
-from vellum_core.http_legacy import mark_legacy_api
+from vellum_core.http_auth import build_scoped_jwt_dependency
 from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
 from vellum_core.logic.private_input_schema import validate_private_input_schema
 from vellum_core.metrics import prometheus_payload
@@ -32,17 +32,20 @@ from vellum_core.security import (
     compute_input_fingerprint,
     seal_job_payload,
 )
+from vellum_core.run_contract import EvidenceInlineV6, EvidenceRefV6
 from vellum_core.schemas import (
     DEFAULT_BATCH_CIRCUIT_ID,
     BatchProveRequest,
     HealthResponse,
-    PolicyRunAcceptedResponse,
-    PolicyRunRequest,
-    PolicyRunStatusResponse,
     ProofStatusResponse,
     ProveAcceptedResponse,
+    RunCreateAcceptedResponseV6,
+    RunCreateRequestV6,
+    RunErrorV6,
+    RunStatusResponseV6,
 )
 from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
+from vellum_core.versioning import HTTP_API_PREFIX, HTTP_API_VERSION, PACKAGE_VERSION
 
 
 PayloadModel = TypeVar("PayloadModel", bound=BaseModel)
@@ -83,7 +86,7 @@ audit_store = VellumAuditStore(
     audit_key_name=settings.vault_audit_key,
 )
 
-app = FastAPI(title="Vellum Prover Service", version="5.0.0")
+app = FastAPI(title="Vellum Prover Service", version=PACKAGE_VERSION)
 register_exception_handlers(app)
 init_telemetry(
     service_name=settings.app_name,
@@ -102,16 +105,7 @@ async def startup_event() -> None:
 
 def require_jwt_with_scopes(*scopes: str):
     """Build a JWT dependency that enforces one set of required scopes."""
-
-    async def _dependency(
-        credentials: HTTPAuthorizationCredentials | None = Depends(BEARER_SCHEME),
-    ) -> dict[str, Any]:
-        return await auth_manager.verify_jwt_credentials(
-            credentials,
-            required_scopes=set(scopes),
-        )
-
-    return _dependency
+    return build_scoped_jwt_dependency(auth_manager, *scopes)
 
 
 async def _decode_and_authenticate(request: Request) -> tuple[BatchProveRequest, str]:
@@ -191,12 +185,12 @@ def _validate_private_input_schema_or_raise(
         ) from exc
 
 
-async def _decode_and_authenticate_policy(request: Request) -> tuple[PolicyRunRequest, str]:
-    """Verify bank handshake over raw body and validate v5 policy-run schema."""
+async def _decode_and_authenticate_policy(request: Request) -> tuple[RunCreateRequestV6, str]:
+    """Verify bank handshake over raw body and validate v6 run-create schema."""
     return await _decode_and_authenticate_payload(
         request,
-        payload_model=PolicyRunRequest,
-        validation_message="Request body does not match policy-run schema",
+        payload_model=RunCreateRequestV6,
+        validation_message="Request body does not match v6 run schema",
     )
 
 
@@ -223,32 +217,32 @@ def _load_policy_manifest(policy_id: str) -> Any:
 async def _resolve_policy_evidence(
     *,
     run_id: str,
-    payload: PolicyRunRequest,
+    payload: RunCreateRequestV6,
 ) -> tuple[dict[str, Any], str | None]:
     """Resolve policy evidence payload and canonical evidence reference."""
-    if payload.evidence_payload is not None:
+    if isinstance(payload.evidence, EvidenceInlineV6):
         evidence_ref = await framework.evidence_store.put(
             run_id=run_id,
-            payload=payload.evidence_payload,
+            payload=payload.evidence.payload,
         )
-        return payload.evidence_payload, evidence_ref
+        return payload.evidence.payload, evidence_ref
 
-    assert payload.evidence_ref is not None
+    assert isinstance(payload.evidence, EvidenceRefV6)
     try:
-        evidence_payload = await framework.evidence_store.get(reference=payload.evidence_ref)
+        evidence_payload = await framework.evidence_store.get(reference=payload.evidence.ref)
     except Exception as exc:
         raise APIError(
             status_code=422,
             code="invalid_evidence_ref",
             message="Unable to resolve evidence_ref",
-            details={"evidence_ref": payload.evidence_ref, "reason": str(exc)},
+            details={"evidence_ref": payload.evidence.ref, "reason": str(exc)},
         ) from exc
-    return evidence_payload, payload.evidence_ref
+    return evidence_payload, payload.evidence.ref
 
 
 def _policy_run_metadata(
     *,
-    payload: PolicyRunRequest,
+    payload: RunCreateRequestV6,
     claims: dict[str, Any],
     bank_key_id: str,
     policy_version: str,
@@ -258,8 +252,8 @@ def _policy_run_metadata(
     """Build normalized metadata persisted for policy-run lifecycle tracking."""
     return {
         "mode": "policy_run",
-        "api_version": "v5",
-        "request_id": payload.request_id,
+        "api_version": HTTP_API_VERSION,
+        "client_request_id": payload.client_request_id,
         "auth_subject": claims.get("sub"),
         "bank_key_id": bank_key_id,
         "policy_id": payload.policy_id,
@@ -272,13 +266,19 @@ def _policy_run_metadata(
 
 
 def _unknown_run_id_error(run_id: str) -> APIError:
-    """Return standardized unknown-run error payload for v5 status lookups."""
+    """Return standardized unknown-run error payload for v6 status lookups."""
     return APIError(
         status_code=404,
         code="unknown_run_id",
         message="No policy run found for id",
         details={"run_id": run_id},
     )
+
+
+def _normalize_lifecycle_state(status: str) -> Literal["queued", "running", "completed", "failed"]:
+    if status in {"queued", "running", "completed", "failed"}:
+        return status
+    return "failed"
 
 
 async def _persist_and_enqueue_job(
@@ -341,14 +341,12 @@ async def metrics(
     return Response(content=payload, media_type=content_type)
 
 
-@app.post("/v1/proofs/batch", status_code=202, response_model=ProveAcceptedResponse)
+@app.post(f"{HTTP_API_PREFIX}/proofs/batch", status_code=202, response_model=ProveAcceptedResponse)
 async def create_batch_proof(
     request: Request,
-    response: Response,
     claims: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:write")),
 ) -> ProveAcceptedResponse:
     """Create asynchronous proof job for one circuit/request mode payload."""
-    mark_legacy_api(response)
     payload, bank_key_id = await _decode_and_authenticate(request)
     circuit_id = payload.circuit_id
 
@@ -427,14 +425,12 @@ async def create_batch_proof(
     return ProveAcceptedResponse(proof_id=proof_id, status="queued")
 
 
-@app.get("/v1/proofs/{proof_id}", response_model=ProofStatusResponse)
+@app.get(f"{HTTP_API_PREFIX}/proofs/{{proof_id}}", response_model=ProofStatusResponse)
 async def get_proof_status(
     proof_id: str,
-    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:read")),
 ) -> ProofStatusResponse:
     """Return persisted status and optional outputs for one proof job."""
-    mark_legacy_api(response)
     job = await db.get_proof_job(proof_id)
     if job is None:
         raise APIError(
@@ -457,16 +453,14 @@ async def get_proof_status(
     )
 
 
-@app.get("/v1/proofs")
+@app.get(f"{HTTP_API_PREFIX}/proofs")
 async def list_proofs(
-    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:read")),
     status: str | None = Query(default=None),
     circuit_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
     """List recent proof jobs with optional status/circuit filters."""
-    mark_legacy_api(response)
     jobs = await db.list_proof_jobs(
         status=status,
         circuit_id=circuit_id,
@@ -494,12 +488,12 @@ async def list_proofs(
     }
 
 
-@app.post("/v5/policy-runs", status_code=202, response_model=PolicyRunAcceptedResponse)
+@app.post(f"{HTTP_API_PREFIX}/runs", status_code=202, response_model=RunCreateAcceptedResponseV6)
 async def create_policy_run(
     request: Request,
     claims: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:write")),
-) -> PolicyRunAcceptedResponse:
-    """Create asynchronous v5 policy run for lending-risk compliance workflows."""
+) -> RunCreateAcceptedResponseV6:
+    """Create asynchronous v6 run resource for compliance workflows."""
     payload, bank_key_id = await _decode_and_authenticate_policy(request)
     policy_manifest = _load_policy_manifest(payload.policy_id)
 
@@ -568,20 +562,20 @@ async def create_policy_run(
         },
     )
 
-    return PolicyRunAcceptedResponse(
+    return RunCreateAcceptedResponseV6(
         run_id=run_id,
         policy_id=payload.policy_id,
-        status="queued",
+        lifecycle_state="queued",
         attestation_id=attestation_id,
     )
 
 
-@app.get("/v5/policy-runs/{run_id}", response_model=PolicyRunStatusResponse)
+@app.get(f"{HTTP_API_PREFIX}/runs/{{run_id}}", response_model=RunStatusResponseV6)
 async def get_policy_run_status(
     run_id: str,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:read")),
-) -> PolicyRunStatusResponse:
-    """Return status and decision metadata for one v5 policy run."""
+) -> RunStatusResponseV6:
+    """Return status and typed lifecycle data for one v6 run resource."""
     job = await db.get_proof_job(run_id)
     if job is None:
         raise _unknown_run_id_error(run_id)
@@ -593,17 +587,30 @@ async def get_policy_run_status(
 
     decision_value = metadata.get("decision")
     decision = decision_value if decision_value in {"pass", "fail"} else None
+    failure_reason = metadata.get("failure_reason")
+    context = metadata.get("context")
+    request_id = metadata.get("client_request_id")
 
-    return PolicyRunStatusResponse(
+    error = None
+    if isinstance(job.error, str) and job.error:
+        error = RunErrorV6(
+            code=str(failure_reason or "run_failed"),
+            message=job.error,
+            details={},
+        )
+
+    return RunStatusResponseV6(
         run_id=run_id,
         policy_id=policy_id,
-        status=job.status,
+        lifecycle_state=_normalize_lifecycle_state(job.status),
         circuit_id=job.circuit_id,
         decision=decision,
         attestation_id=str(metadata.get("attestation_id") or f"att-{run_id}"),
-        evidence_ref=metadata.get("evidence_ref"),
-        metadata=metadata,
-        created_at=job.created_at,
+        evidence_ref=str(metadata.get("evidence_ref")) if metadata.get("evidence_ref") else None,
+        client_request_id=str(request_id) if isinstance(request_id, str) and request_id else None,
+        context=context if isinstance(context, dict) else {},
+        error=error,
+        submitted_at=job.created_at,
         updated_at=job.updated_at,
     )
 

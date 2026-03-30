@@ -57,6 +57,7 @@ from vellum_core.errors import APIError, register_exception_handlers
 from vellum_core.logic.batcher import MAX_BATCH_SIZE
 from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.vault import VaultTransitClient
+from vellum_core.versioning import HTTP_API_PREFIX, PACKAGE_VERSION
 
 
 class DemoBatchProveRequest(BaseModel):
@@ -103,13 +104,35 @@ class DemoVerifyRequest(BaseModel):
 
 
 class DemoPolicyRunRequest(BaseModel):
-    """Request model for v5 policy-run demo flow."""
+    """Request model for v6 run demo flow."""
 
     policy_id: str = "lending_risk_v1"
     evidence_payload: dict[str, Any] | None = None
     evidence_ref: str | None = None
     context: dict[str, Any] | None = None
-    request_id: str | None = None
+    client_request_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> "DemoPolicyRunRequest":
+        if self.evidence_payload is None and self.evidence_ref is None:
+            raise ValueError("Provide evidence_payload or evidence_ref")
+        if self.evidence_payload is not None and self.evidence_ref is not None:
+            raise ValueError("Provide only one evidence source")
+        return self
+
+    def to_v6_payload(self) -> dict[str, Any]:
+        evidence: dict[str, Any]
+        if self.evidence_payload is not None:
+            evidence = {"type": "inline", "payload": self.evidence_payload}
+        else:
+            assert self.evidence_ref is not None
+            evidence = {"type": "ref", "ref": self.evidence_ref}
+        return {
+            "policy_id": self.policy_id,
+            "evidence": evidence,
+            "context": self.context or {},
+            "client_request_id": self.client_request_id,
+        }
 
 
 class DashboardConfig:
@@ -156,7 +179,7 @@ jwt_signer = VaultJWTSigner(
     audience=config.jwt_audience,
 )
 
-app = FastAPI(title="Vellum Framework Console", version="5.0.0")
+app = FastAPI(title="Vellum Framework Console", version=PACKAGE_VERSION)
 register_exception_handlers(app)
 init_telemetry(
     service_name=config.app_name,
@@ -229,6 +252,39 @@ def _upstream_error(service: str, response: httpx.Response) -> APIError:
     )
 
 
+async def _proxy_get_json(
+    *,
+    service: str,
+    url: str,
+    headers: dict[str, str],
+    timeout: float = 30.0,
+    params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Issue one upstream GET and return parsed JSON with normalized error handling."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(url, headers=headers, params=params)
+    if response.status_code != 200:
+        raise _upstream_error(service, response)
+    return response.json()
+
+
+async def _proxy_post_json(
+    *,
+    service: str,
+    url: str,
+    headers: dict[str, str],
+    content: bytes,
+    timeout: float = 60.0,
+    expected_status: int = 200,
+) -> dict[str, Any]:
+    """Issue one upstream JSON POST and return parsed JSON with normalized error handling."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, headers=headers, content=content)
+    if response.status_code != expected_status:
+        raise _upstream_error(service, response)
+    return response.json()
+
+
 async def _http_status(name: str, url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
     """Collect one HTTP-based component health check result."""
     try:
@@ -278,7 +334,11 @@ async def _framework_health_snapshot() -> dict[str, Any]:
         _http_status("vault", f"{config.vault_addr}/v1/sys/health", headers=vault_headers),
         _tcp_status("redis", config.redis_host, config.redis_port),
         _tcp_status("postgres", config.postgres_host, config.postgres_port),
-        _http_status("trust_speed", f"{config.verifier_url}/v1/trust-speed", headers=auth_headers),
+        _http_status(
+            "trust_speed",
+            f"{config.verifier_url}{HTTP_API_PREFIX}/trust-speed",
+            headers=auth_headers,
+        ),
     )
 
     components = {
@@ -313,15 +373,12 @@ async def _list_proofs(
     if circuit_id is not None:
         params["circuit_id"] = circuit_id
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{config.prover_url}/v1/proofs",
-            headers={"Authorization": f"Bearer {token}"},
-            params=params,
-        )
-    if response.status_code != 200:
-        raise _upstream_error("prover", response)
-    return response.json()
+    return await _proxy_get_json(
+        service="prover",
+        url=f"{config.prover_url}{HTTP_API_PREFIX}/proofs",
+        headers={"Authorization": f"Bearer {token}"},
+        params=params,
+    )
 
 
 def _iso_now() -> str:
@@ -1224,26 +1281,24 @@ async def framework_overview() -> dict[str, Any]:
 async def framework_circuits() -> dict[str, Any]:
     """Proxy verifier circuit status endpoint."""
     token = await _jwt_token()
-    path = "/v1/circuits"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{config.verifier_url}{path}", headers=headers)
-    if response.status_code != 200:
-        raise _upstream_error("verifier", response)
-    return response.json()
+    path = f"{HTTP_API_PREFIX}/circuits"
+    return await _proxy_get_json(
+        service="verifier",
+        url=f"{config.verifier_url}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
 @app.get("/api/framework/audit-chain")
 async def framework_audit_chain() -> dict[str, Any]:
     """Proxy verifier audit integrity endpoint."""
     token = await _jwt_token()
-    path = "/v1/audit/verify-chain"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{config.verifier_url}{path}", headers=headers)
-    if response.status_code != 200:
-        raise _upstream_error("verifier", response)
-    return response.json()
+    path = f"{HTTP_API_PREFIX}/audit/verify-chain"
+    return await _proxy_get_json(
+        service="verifier",
+        url=f"{config.verifier_url}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
 @app.post("/api/demo/prove")
@@ -1274,30 +1329,31 @@ async def demo_prove(request: Request) -> dict[str, Any]:
 
     body = payload.model_dump_json(exclude_none=True).encode("utf-8")
     token = await _jwt_token()
-    path = "/v1/proofs/batch"
+    path = f"{HTTP_API_PREFIX}/proofs/batch"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         **(await _handshake_headers("POST", path, body)),
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(f"{config.prover_url}{path}", content=body, headers=headers)
-    if response.status_code != 202:
-        raise _upstream_error("prover", response)
-    return response.json()
+    return await _proxy_post_json(
+        service="prover",
+        url=f"{config.prover_url}{path}",
+        headers=headers,
+        content=body,
+        expected_status=202,
+    )
 
 
 @app.get("/api/demo/proofs/{proof_id}")
 async def demo_proof_status(proof_id: str) -> dict[str, Any]:
     """Proxy single proof status lookup from prover service."""
     token = await _jwt_token()
-    path = f"/v1/proofs/{proof_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{config.prover_url}{path}", headers=headers)
-    if response.status_code != 200:
-        raise _upstream_error("prover", response)
-    return response.json()
+    path = f"{HTTP_API_PREFIX}/proofs/{proof_id}"
+    return await _proxy_get_json(
+        service="prover",
+        url=f"{config.prover_url}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
 @app.get("/api/demo/proofs")
@@ -1318,74 +1374,70 @@ async def demo_list_proofs(
 async def demo_verify(payload: DemoVerifyRequest) -> dict[str, Any]:
     """Proxy verifier proof-check endpoint."""
     token = await _jwt_token()
-    path = "/v1/verify"
+    path = f"{HTTP_API_PREFIX}/verify"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{config.verifier_url}{path}",
-            content=payload.model_dump_json(),
-            headers=headers,
-        )
-    if response.status_code != 200:
-        raise _upstream_error("verifier", response)
-    return response.json()
+    return await _proxy_post_json(
+        service="verifier",
+        url=f"{config.verifier_url}{path}",
+        headers=headers,
+        content=payload.model_dump_json().encode("utf-8"),
+    )
 
 
 @app.get("/api/trust-speed")
 async def demo_trust_speed() -> dict[str, Any]:
     """Proxy trust-speed snapshot endpoint from verifier service."""
     token = await _jwt_token()
-    path = "/v1/trust-speed"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{config.verifier_url}{path}", headers=headers)
-    if response.status_code != 200:
-        raise _upstream_error("verifier", response)
-    return response.json()
+    path = f"{HTTP_API_PREFIX}/trust-speed"
+    return await _proxy_get_json(
+        service="verifier",
+        url=f"{config.verifier_url}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
-@app.post("/api/v5/policy-runs")
+@app.post("/api/v6/runs")
 async def demo_policy_run(payload: DemoPolicyRunRequest) -> dict[str, Any]:
-    """Proxy v5 policy-run creation endpoint."""
-    body = payload.model_dump_json(exclude_none=True).encode("utf-8")
+    """Proxy v6 run creation endpoint."""
+    body = json.dumps(payload.to_v6_payload(), separators=(",", ":")).encode("utf-8")
     token = await _jwt_token()
-    path = "/v5/policy-runs"
+    path = f"{HTTP_API_PREFIX}/runs"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         **(await _handshake_headers("POST", path, body)),
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(f"{config.prover_url}{path}", content=body, headers=headers)
-    if response.status_code != 202:
-        raise _upstream_error("prover", response)
-    return response.json()
+    return await _proxy_post_json(
+        service="prover",
+        url=f"{config.prover_url}{path}",
+        headers=headers,
+        content=body,
+        expected_status=202,
+    )
 
 
-@app.get("/api/v5/policy-runs/{run_id}")
+@app.get("/api/v6/runs/{run_id}")
 async def demo_policy_run_status(run_id: str) -> dict[str, Any]:
-    """Proxy v5 policy-run status endpoint."""
+    """Proxy v6 run status endpoint."""
     token = await _jwt_token()
-    path = f"/v5/policy-runs/{run_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{config.prover_url}{path}", headers=headers)
-    if response.status_code != 200:
-        raise _upstream_error("prover", response)
-    return response.json()
+    path = f"{HTTP_API_PREFIX}/runs/{run_id}"
+    return await _proxy_get_json(
+        service="prover",
+        url=f"{config.prover_url}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
-@app.get("/api/v5/attestations/{attestation_id}")
-async def demo_attestation_export(attestation_id: str) -> dict[str, Any]:
-    """Proxy v5 attestation export endpoint."""
+@app.get("/api/v6/runs/{run_id}/attestation")
+async def demo_attestation_export(run_id: str) -> dict[str, Any]:
+    """Proxy v6 attestation export endpoint."""
     token = await _jwt_token()
-    path = f"/v5/attestations/{attestation_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{config.verifier_url}{path}", headers=headers)
-    if response.status_code != 200:
-        raise _upstream_error("verifier", response)
-    return response.json()
+    path = f"{HTTP_API_PREFIX}/runs/{run_id}/attestation"
+    return await _proxy_get_json(
+        service="verifier",
+        url=f"{config.verifier_url}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
 if __name__ == "__main__":

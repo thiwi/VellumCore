@@ -204,7 +204,7 @@ async def submit_and_wait(
     private_input: dict[str, Any],
 ) -> tuple[float, str]:
     """Submit one proof request and poll until completed/failed."""
-    path = "/v1/proofs/batch"
+    path = "/v6/proofs/batch"
     payload = {"circuit_id": circuit_id, "private_input": private_input}
     body = json.dumps(payload).encode("utf-8")
     headers = {
@@ -225,7 +225,7 @@ async def submit_and_wait(
     response.raise_for_status()
     proof_id = response.json()["proof_id"]
 
-    status_path = f"/v1/proofs/{proof_id}"
+    status_path = f"/v6/proofs/{proof_id}"
     status_headers = {"Authorization": f"Bearer {token}"}
     while True:
         status_resp = await client.get(f"{prover_url}{status_path}", headers=status_headers)

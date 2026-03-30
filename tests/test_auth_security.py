@@ -99,7 +99,7 @@ class _Request:
         headers: dict[str, str],
         *,
         method: str = "POST",
-        path: str = "/v1/proofs/batch",
+        path: str = "/v6/proofs/batch",
         client_host: str | None = "127.0.0.1",
     ) -> None:
         self.headers = headers
@@ -237,12 +237,12 @@ def test_build_canonical_request_string_is_deterministic() -> None:
     expected_hash = hashlib.sha256(body).hexdigest()
     canonical = build_canonical_request_string(
         method="POST",
-        path="/v1/proofs/batch",
+        path="/v6/proofs/batch",
         timestamp="1700000000",
         nonce="nonce-1",
         raw_body=body,
     )
-    assert canonical == f"POST\n/v1/proofs/batch\n1700000000\nnonce-1\n{expected_hash}"
+    assert canonical == f"POST\n/v6/proofs/batch\n1700000000\nnonce-1\n{expected_hash}"
 
 
 def test_nonce_replay_guard_rejects_second_use() -> None:

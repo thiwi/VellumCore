@@ -89,7 +89,7 @@ def test_policy_engine_run_and_export(tmp_path: Path) -> None:
         engine.run(
             PolicyRunRequest(
                 policy_id="lending_risk_v1",
-                evidence_payload={"balances": [120], "limits": [100]},
+                evidence={"type": "inline", "payload": {"balances": [120], "limits": [100]}},
                 context={"tenant": "acme"},
             )
         )
@@ -132,7 +132,7 @@ def test_policy_engine_rejects_unknown_policy(tmp_path: Path) -> None:
             engine.run(
                 PolicyRunRequest(
                     policy_id="missing",
-                    evidence_payload={"balances": [1], "limits": [0]},
+                    evidence={"type": "inline", "payload": {"balances": [1], "limits": [0]}},
                 )
             )
         )
@@ -232,7 +232,7 @@ def test_policy_engine_hard_fails_on_dual_track_mismatch(tmp_path: Path) -> None
             engine.run(
                 PolicyRunRequest(
                     policy_id="lending_risk_v1",
-                    evidence_payload={"balances": [120], "limits": [100]},
+                    evidence={"type": "inline", "payload": {"balances": [120], "limits": [100]}},
                     context={"tenant": "acme"},
                 )
             )

@@ -1,0 +1,355 @@
+{
+  "AttestationResponseV6": {
+    "$defs": {
+      "PolicyDescriptorV6": {
+        "description": "Policy descriptor embedded in v6 attestation responses.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "PolicyDescriptorV6",
+        "type": "object"
+      }
+    },
+    "description": "Exportable v6 attestation bundle payload for run resources.",
+    "properties": {
+      "artifact_digests": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Artifact Digests",
+        "type": "object"
+      },
+      "attestation_id": {
+        "title": "Attestation Id",
+        "type": "string"
+      },
+      "circuit_id": {
+        "title": "Circuit Id",
+        "type": "string"
+      },
+      "decision": {
+        "enum": [
+          "pass",
+          "fail"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "exported_at": {
+        "format": "date-time",
+        "title": "Exported At",
+        "type": "string"
+      },
+      "policy": {
+        "$ref": "#/$defs/PolicyDescriptorV6"
+      },
+      "proof_hash": {
+        "title": "Proof Hash",
+        "type": "string"
+      },
+      "public_signals_hash": {
+        "title": "Public Signals Hash",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      },
+      "signature_chain": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Signature Chain",
+        "type": "array"
+      }
+    },
+    "required": [
+      "attestation_id",
+      "run_id",
+      "policy",
+      "circuit_id",
+      "decision",
+      "proof_hash",
+      "public_signals_hash",
+      "artifact_digests",
+      "signature_chain",
+      "exported_at"
+    ],
+    "title": "AttestationResponseV6",
+    "type": "object"
+  },
+  "RunCreateAcceptedResponseV6": {
+    "description": "Asynchronous v6 run-submission acknowledgement.",
+    "properties": {
+      "attestation_id": {
+        "title": "Attestation Id",
+        "type": "string"
+      },
+      "lifecycle_state": {
+        "const": "queued",
+        "title": "Lifecycle State",
+        "type": "string"
+      },
+      "policy_id": {
+        "title": "Policy Id",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "policy_id",
+      "lifecycle_state",
+      "attestation_id"
+    ],
+    "title": "RunCreateAcceptedResponseV6",
+    "type": "object"
+  },
+  "RunCreateRequestV6": {
+    "$defs": {
+      "EvidenceInlineV6": {
+        "additionalProperties": false,
+        "description": "Inline evidence payload embedded in a run-create request.",
+        "properties": {
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "type": {
+            "const": "inline",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "EvidenceInlineV6",
+        "type": "object"
+      },
+      "EvidenceRefV6": {
+        "additionalProperties": false,
+        "description": "Evidence reference pointer used in a run-create request.",
+        "properties": {
+          "ref": {
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "type": {
+            "const": "ref",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "title": "EvidenceRefV6",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "V6 request model for creating one policy run from typed evidence input.",
+    "properties": {
+      "client_request_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Client Request Id"
+      },
+      "context": {
+        "additionalProperties": true,
+        "title": "Context",
+        "type": "object"
+      },
+      "evidence": {
+        "discriminator": {
+          "mapping": {
+            "inline": "#/$defs/EvidenceInlineV6",
+            "ref": "#/$defs/EvidenceRefV6"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/EvidenceInlineV6"
+          },
+          {
+            "$ref": "#/$defs/EvidenceRefV6"
+          }
+        ],
+        "title": "Evidence"
+      },
+      "policy_id": {
+        "minLength": 1,
+        "title": "Policy Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "policy_id",
+      "evidence"
+    ],
+    "title": "RunCreateRequestV6",
+    "type": "object"
+  },
+  "RunStatusResponseV6": {
+    "$defs": {
+      "RunErrorV6": {
+        "description": "Typed run failure payload used by v6 run status responses.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "RunErrorV6",
+        "type": "object"
+      }
+    },
+    "description": "Status payload for one persisted v6 run resource.",
+    "properties": {
+      "attestation_id": {
+        "title": "Attestation Id",
+        "type": "string"
+      },
+      "circuit_id": {
+        "title": "Circuit Id",
+        "type": "string"
+      },
+      "client_request_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Client Request Id"
+      },
+      "context": {
+        "additionalProperties": true,
+        "title": "Context",
+        "type": "object"
+      },
+      "decision": {
+        "anyOf": [
+          {
+            "enum": [
+              "pass",
+              "fail"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Decision"
+      },
+      "error": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RunErrorV6"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "evidence_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Evidence Ref"
+      },
+      "lifecycle_state": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "Lifecycle State",
+        "type": "string"
+      },
+      "policy_id": {
+        "title": "Policy Id",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      },
+      "submitted_at": {
+        "format": "date-time",
+        "title": "Submitted At",
+        "type": "string"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "policy_id",
+      "lifecycle_state",
+      "circuit_id",
+      "attestation_id",
+      "submitted_at",
+      "updated_at"
+    ],
+    "title": "RunStatusResponseV6",
+    "type": "object"
+  }
+}

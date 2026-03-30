@@ -1,4 +1,4 @@
-"""Security regression checks for legacy circuit constraints."""
+"""Security regression checks for historical circuit constraints."""
 
 from __future__ import annotations
 
@@ -46,4 +46,3 @@ def test_reserve_ratio_check_has_domain_and_boolean_constraints() -> None:
     assert "liabilities_ge_min.in[1] <== 1;" in src
     assert "min_ratio_le_max.in[1] <== 20000;" in src
     assert "reserve_ok * (reserve_ok - 1) === 0;" in src
-

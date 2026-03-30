@@ -1,5 +1,36 @@
 # Changelog
 
+## 6.0.0 - Resource-Oriented V6 Surface
+
+### Added
+
+- New v6 run resource endpoints:
+  - `POST /v6/runs`
+  - `GET /v6/runs/{run_id}`
+  - `GET /v6/runs/{run_id}/attestation`
+- New typed v6 contracts:
+  - `RunCreateRequestV6` (discriminated evidence union: `inline|ref`)
+  - `RunStatusResponseV6` (`lifecycle_state`, typed `error`)
+  - `AttestationResponseV6` (`policy { id, version }`)
+- New migration index: `docs/MIGRATIONS.md`.
+- New migration guide: `docs/MIGRATION_V5_TO_V6.md`.
+- New release notes: `docs/releases/v6.0.0.md`.
+
+### Changed
+
+- Removed legacy v1 and v5 HTTP route surfaces from reference services.
+- Migrated supporting service routes to v6 namespace:
+  - Prover proof routes now under `/v6/proofs/*`
+  - Verifier verification/ops routes now under `/v6/*`
+- Dashboard proxies switched to v6 upstream routes.
+- Centralized package/API version constants and shared auth dependency factory for HTTP services.
+- Package metadata version updated to `6.0.0`.
+
+### Docs
+
+- Updated README, API reference, architecture, operations, compatibility, security, SDK, and release checklist to v6.
+- CI release-readiness gate now validates migration and release artifacts without hardcoding a single migration filename.
+
 ## 5.0.0-rc1 - Enterprise Contract and Security Gates
 
 ### Added

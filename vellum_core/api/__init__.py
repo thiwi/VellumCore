@@ -7,6 +7,7 @@ from vellum_core.api.framework_client import FrameworkClient
 from vellum_core.api.attestation_service import AttestationService
 from vellum_core.api.policy_engine import PolicyEngine
 from vellum_core.api.proof_engine import ProofEngine
+from vellum_core.run_contract import EvidenceInlineV6, EvidenceRefV6, RunCreateRequestV6
 from vellum_core.api.types import (
     AuditResult,
     AttestationBundle,
@@ -28,6 +29,8 @@ __all__ = [
     "CircuitManager",
     "CircuitStatus",
     "DirectBatchInput",
+    "EvidenceInlineV6",
+    "EvidenceRefV6",
     "FrameworkClient",
     "FrameworkConfig",
     "FrameworkError",
@@ -38,6 +41,7 @@ __all__ = [
     "ProofEngine",
     "ProofGenerationRequest",
     "ProofGenerationResult",
+    "RunCreateRequestV6",
     "VerificationRequest",
     "VerificationResult",
 ]

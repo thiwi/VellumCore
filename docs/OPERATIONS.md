@@ -28,10 +28,10 @@ curl -fsS http://localhost:8002/healthz
 
 - `GET /api/framework/overview` (dashboard aggregate)
 - `GET /api/framework/diagnostics` (degraded dependency details)
-- `GET /v1/circuits` (artifact readiness)
-- `GET /v1/audit/verify-chain` (audit integrity)
-- `GET /v5/policy-runs/{run_id}` (policy decision lifecycle)
-- `GET /v5/attestations/{attestation_id}` (exportable compliance evidence bundle)
+- `GET /v6/circuits` (artifact readiness)
+- `GET /v6/audit/verify-chain` (audit integrity)
+- `GET /v6/runs/{run_id}` (policy decision lifecycle)
+- `GET /v6/runs/{run_id}/attestation` (exportable compliance evidence bundle)
 
 ## Incident Priorities
 

@@ -16,7 +16,7 @@ Validation checks:
 
 ### 2) Bank request handshake (prover submit)
 
-`POST /v1/proofs/batch` requires signed anti-replay headers.
+`POST /v6/proofs/batch` and `POST /v6/runs` require signed anti-replay headers.
 
 - Signature covers method, path, timestamp, nonce, and body hash.
 - Signature key is resolved through `BANK_KEY_MAPPING_JSON`.

@@ -1,4 +1,4 @@
-"""Tests for Prover v5 routes."""
+"""Tests for Prover v6 routes."""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def _patch_auth(
 
 
 @pytest.mark.integration
-def test_v5_policy_run_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_run_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     prover_service = _load_prover_service(monkeypatch)
 
     calls: dict[str, Any] = {}
@@ -118,10 +118,10 @@ def test_v5_policy_run_submit(monkeypatch: pytest.MonkeyPatch) -> None:
 
     client = TestClient(prover_service.app)
     response = client.post(
-        "/v5/policy-runs",
+        "/v6/runs",
         json={
             "policy_id": "lending_risk_v1",
-            "evidence_payload": {"balances": [120], "limits": [100]},
+            "evidence": {"type": "inline", "payload": {"balances": [120], "limits": [100]}},
             "context": {"tenant": "acme"},
         },
         headers={"Authorization": "Bearer demo"},
@@ -130,14 +130,14 @@ def test_v5_policy_run_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 202
     body = response.json()
     assert body["policy_id"] == "lending_risk_v1"
-    assert body["status"] == "queued"
+    assert body["lifecycle_state"] == "queued"
     assert body["attestation_id"].startswith("att-")
     assert calls["enqueue"]["task_name"] == "worker.process_proof_job"
     assert calls["create_proof_job"]["circuit_id"] == "batch_credit_check"
 
 
 @pytest.mark.integration
-def test_v1_proof_list_returns_legacy_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_proof_list(monkeypatch: pytest.MonkeyPatch) -> None:
     prover_service = _load_prover_service(monkeypatch)
     _patch_auth(monkeypatch, prover_service, required_scope="proofs:read")
 
@@ -147,16 +147,13 @@ def test_v1_proof_list_returns_legacy_headers(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(prover_service.db, "list_proof_jobs", fake_list_proof_jobs, raising=False)
 
     client = TestClient(prover_service.app)
-    response = client.get("/v1/proofs", headers={"Authorization": "Bearer demo"})
+    response = client.get("/v6/proofs", headers={"Authorization": "Bearer demo"})
 
     assert response.status_code == 200
-    assert response.headers["Deprecation"] == "true"
-    assert response.headers["Sunset"] == "Tue, 30 Sep 2026 00:00:00 GMT"
-    assert "MIGRATION_V4_TO_V5" in response.headers["Link"]
 
 
 @pytest.mark.integration
-def test_v5_policy_run_submit_with_evidence_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_run_submit_with_evidence_ref(monkeypatch: pytest.MonkeyPatch) -> None:
     prover_service = _load_prover_service(monkeypatch)
     _patch_auth(monkeypatch, prover_service, required_scope="proofs:write")
 
@@ -207,10 +204,10 @@ def test_v5_policy_run_submit_with_evidence_ref(monkeypatch: pytest.MonkeyPatch)
 
     client = TestClient(prover_service.app)
     response = client.post(
-        "/v5/policy-runs",
+        "/v6/runs",
         json={
             "policy_id": "lending_risk_v1",
-            "evidence_ref": "memory://existing-evidence",
+            "evidence": {"type": "ref", "ref": "memory://existing-evidence"},
             "context": {"tenant": "acme"},
         },
         headers={"Authorization": "Bearer demo"},
@@ -223,7 +220,7 @@ def test_v5_policy_run_submit_with_evidence_ref(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.integration
-def test_v5_policy_run_unknown_policy_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_run_unknown_policy_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
     prover_service = _load_prover_service(monkeypatch)
     _patch_auth(monkeypatch, prover_service, required_scope="proofs:write")
 
@@ -235,10 +232,10 @@ def test_v5_policy_run_unknown_policy_returns_404(monkeypatch: pytest.MonkeyPatc
 
     client = TestClient(prover_service.app)
     response = client.post(
-        "/v5/policy-runs",
+        "/v6/runs",
         json={
             "policy_id": "unknown_policy",
-            "evidence_payload": {"balances": [120], "limits": [100]},
+            "evidence": {"type": "inline", "payload": {"balances": [120], "limits": [100]}},
         },
         headers={"Authorization": "Bearer demo"},
     )
@@ -248,14 +245,14 @@ def test_v5_policy_run_unknown_policy_returns_404(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.integration
-def test_v1_batch_submit_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_batch_submit_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAX_SUBMIT_BODY_BYTES", "128")
     prover_service = _load_prover_service(monkeypatch)
     _patch_auth(monkeypatch, prover_service, required_scope="proofs:write")
 
     client = TestClient(prover_service.app)
     response = client.post(
-        "/v1/proofs/batch",
+        "/v6/proofs/batch",
         json={"balances": [1] * 200, "limits": [0] * 200},
         headers={"Authorization": "Bearer demo"},
     )
@@ -264,7 +261,7 @@ def test_v1_batch_submit_rejects_oversized_payload(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.integration
-def test_v1_batch_submit_rejects_private_input_schema_violation(
+def test_v6_batch_submit_rejects_private_input_schema_violation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prover_service = _load_prover_service(monkeypatch)
@@ -272,7 +269,7 @@ def test_v1_batch_submit_rejects_private_input_schema_violation(
 
     client = TestClient(prover_service.app)
     response = client.post(
-        "/v1/proofs/batch",
+        "/v6/proofs/batch",
         json={
             "circuit_id": "credit_check",
             "private_input": {"credit_score": -1, "debt_ratio": 10},

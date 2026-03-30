@@ -1,4 +1,4 @@
-# Vellum Core SDK (v5)
+# Vellum Core SDK (v6)
 
 ## Scope
 
@@ -31,7 +31,7 @@ framework = FrameworkClient.from_env()
 result = await framework.policy_engine.run(
     PolicyRunRequest(
         policy_id="lending_risk_v1",
-        evidence_payload={"balances": [120], "limits": [100]},
+        evidence={"type": "inline", "payload": {"balances": [120], "limits": [100]}},
     )
 )
 bundle = await framework.attestation_service.export(result.attestation_id)

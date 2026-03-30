@@ -47,14 +47,14 @@ Bootstrap flow:
 1. `framework-init` compiles and publishes required artifacts.
 2. Prover/worker/verifier start only after bootstrap completion.
 
-v5 primary flow:
+v6 primary flow:
 
-1. Client sends `POST /v5/policy-runs` with JWT + bank handshake headers.
+1. Client sends `POST /v6/runs` with JWT + bank handshake headers.
 2. Prover resolves policy pack, normalizes evidence, and stores queued run.
 3. Worker transitions run `queued -> running -> completed|failed`.
 4. Worker persists proof/public signals and policy decision (`pass|fail`) in job metadata.
-5. Verifier exports compliance attestation via `GET /v5/attestations/{attestation_id}`.
-6. Audit integrity remains checkable via `GET /v1/audit/verify-chain`.
+5. Verifier exports compliance attestation via `GET /v6/runs/{run_id}/attestation`.
+6. Audit integrity remains checkable via `GET /v6/audit/verify-chain`.
 
 Quality gates:
 
@@ -70,8 +70,8 @@ Quality gates:
 
 `PolicyRunRequest` supports:
 
-- `evidence_payload` (recommended)
-- `evidence_ref` (pre-stored evidence)
+- `evidence.type=inline` with payload object
+- `evidence.type=ref` with persisted evidence reference
 
 ## Module Map
 

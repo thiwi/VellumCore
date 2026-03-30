@@ -89,6 +89,29 @@ def test_build_input_summary_for_modes() -> None:
     assert private["private_input_keys"] == ["a", "b"]
 
 
+def test_policy_run_summary_and_fingerprint_use_v6_evidence_shape() -> None:
+    payload = {
+        "policy_id": "lending_risk_v1",
+        "evidence": {
+            "type": "inline",
+            "payload": {"balances": [10], "limits": [5]},
+        },
+    }
+    summary = build_input_summary(
+        source_mode="policy_run",
+        payload=payload,
+        circuit_id="batch_credit_check",
+    )
+    assert summary["policy_id"] == "lending_risk_v1"
+    assert summary["evidence_type"] == "inline"
+    assert summary["evidence_keys"] == ["balances", "limits"]
+    assert summary["has_evidence_ref"] is False
+
+    fingerprint = compute_input_fingerprint(source_mode="policy_run", payload=payload)
+    assert isinstance(fingerprint, str)
+    assert len(fingerprint) == 64
+
+
 def test_seal_and_unseal_job_payload_roundtrip() -> None:
     vault = _FakeVault()
     sealed = asyncio.run(

@@ -30,7 +30,7 @@
 - [ ] Update `docs/SECURITY.md`
 - [ ] Update `docs/TROUBLESHOOTING.md`
 - [ ] Update `docs/SDK.md`
-- [ ] Update `docs/MIGRATION_V4_TO_V5.md` when breaking changes occur
+- [ ] Update `docs/MIGRATIONS.md` and add/refresh version-specific migration docs when breaking changes occur
 - [ ] Update `docs/COMPATIBILITY.md`
 - [ ] Update release notes in `docs/releases/` for the release tag
 - [ ] Update `CHANGELOG.md`

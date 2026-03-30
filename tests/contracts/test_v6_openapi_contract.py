@@ -1,4 +1,4 @@
-"""Tests for V5 openapi contract."""
+"""Tests for V6 openapi contract."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from typing import Any
 import pytest
 
 from vellum_core.schemas import (
-    AttestationExportResponse,
-    PolicyRunAcceptedResponse,
-    PolicyRunRequest,
-    PolicyRunStatusResponse,
+    AttestationResponseV6,
+    RunCreateAcceptedResponseV6,
+    RunCreateRequestV6,
+    RunStatusResponseV6,
 )
 
 pytestmark = pytest.mark.contract
@@ -84,7 +84,7 @@ def _openapi_operation(
 
 
 @pytest.mark.unit
-def test_v5_http_surface_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_http_surface_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     prover_app = _load_service_app(module_name="prover_service", monkeypatch=monkeypatch)
     verifier_app = _load_service_app(module_name="verifier_service", monkeypatch=monkeypatch)
     prover_openapi = prover_app.openapi()
@@ -92,34 +92,34 @@ def test_v5_http_surface_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
 
     snapshot_payload = {
         "prover": {
-            "/v5/policy-runs#post": _openapi_operation(
+            "/v6/runs#post": _openapi_operation(
                 prover_openapi,
-                path="/v5/policy-runs",
+                path="/v6/runs",
                 method="post",
             ),
-            "/v5/policy-runs/{run_id}#get": _openapi_operation(
+            "/v6/runs/{run_id}#get": _openapi_operation(
                 prover_openapi,
-                path="/v5/policy-runs/{run_id}",
+                path="/v6/runs/{run_id}",
                 method="get",
             ),
         },
         "verifier": {
-            "/v5/attestations/{attestation_id}#get": _openapi_operation(
+            "/v6/runs/{run_id}/attestation#get": _openapi_operation(
                 verifier_openapi,
-                path="/v5/attestations/{attestation_id}",
+                path="/v6/runs/{run_id}/attestation",
                 method="get",
             ),
         },
     }
-    _assert_snapshot("v5_http_surface.json", snapshot_payload)
+    _assert_snapshot("v6_http_surface.json", snapshot_payload)
 
 
 @pytest.mark.unit
-def test_v5_model_schema_snapshot() -> None:
+def test_v6_model_schema_snapshot() -> None:
     snapshot_payload = {
-        "PolicyRunRequest": PolicyRunRequest.model_json_schema(),
-        "PolicyRunAcceptedResponse": PolicyRunAcceptedResponse.model_json_schema(),
-        "PolicyRunStatusResponse": PolicyRunStatusResponse.model_json_schema(),
-        "AttestationExportResponse": AttestationExportResponse.model_json_schema(),
+        "RunCreateRequestV6": RunCreateRequestV6.model_json_schema(),
+        "RunCreateAcceptedResponseV6": RunCreateAcceptedResponseV6.model_json_schema(),
+        "RunStatusResponseV6": RunStatusResponseV6.model_json_schema(),
+        "AttestationResponseV6": AttestationResponseV6.model_json_schema(),
     }
-    _assert_snapshot("v5_model_schemas.json", snapshot_payload)
+    _assert_snapshot("v6_model_schemas.json", snapshot_payload)

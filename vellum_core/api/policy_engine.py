@@ -21,6 +21,7 @@ from vellum_core.policies.dual_track import (
     prepare_reference_track,
 )
 from vellum_core.policy_registry import PolicyNotFoundError, PolicyRegistry
+from vellum_core.run_contract import EvidenceInlineV6, EvidenceRefV6
 from vellum_core.spi import EvidenceStore
 
 
@@ -131,9 +132,13 @@ class PolicyEngine:
         run_id: str,
         request: PolicyRunRequest,
     ) -> tuple[dict[str, Any], str | None]:
-        if request.evidence_payload is not None:
-            evidence_ref = await self.evidence_store.put(run_id=run_id, payload=request.evidence_payload)
-            return request.evidence_payload, evidence_ref
-        assert request.evidence_ref is not None
-        payload = await self.evidence_store.get(reference=request.evidence_ref)
-        return payload, request.evidence_ref
+        if isinstance(request.evidence, EvidenceInlineV6):
+            evidence_ref = await self.evidence_store.put(
+                run_id=run_id,
+                payload=request.evidence.payload,
+            )
+            return request.evidence.payload, evidence_ref
+
+        assert isinstance(request.evidence, EvidenceRefV6)
+        payload = await self.evidence_store.get(reference=request.evidence.ref)
+        return payload, request.evidence.ref

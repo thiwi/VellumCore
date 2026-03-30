@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from vellum_core.run_contract import RunCreateRequestV6
 
 
 class DirectBatchInput(BaseModel):
@@ -73,21 +74,8 @@ class VerificationResult(BaseModel):
     verified_at: datetime
 
 
-class PolicyRunRequest(BaseModel):
-    """Domain-centric request for running a policy on evidence."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    policy_id: str = Field(min_length=1)
-    evidence_payload: dict[str, Any] | None = None
-    evidence_ref: str | None = None
-    context: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def validate_evidence_mode(self) -> "PolicyRunRequest":
-        if self.evidence_payload is None and self.evidence_ref is None:
-            raise ValueError("Provide evidence_payload or evidence_ref")
-        return self
+# Backward-compatible alias for SDK imports that still reference PolicyRunRequest.
+PolicyRunRequest = RunCreateRequestV6
 
 
 class PolicyRunResult(BaseModel):

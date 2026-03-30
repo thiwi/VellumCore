@@ -82,7 +82,7 @@ def test_build_handshake_headers_uses_canonical_payload(monkeypatch: pytest.Monk
     headers = asyncio.run(
         stress_tester.build_handshake_headers(
             method="POST",
-            path="/v1/proofs/batch",
+            path="/v6/proofs/batch",
             body=body,
             bank_key_id="bank-key-1",
             vault_client="client",  # type: ignore[arg-type]
@@ -97,7 +97,7 @@ def test_build_handshake_headers_uses_canonical_payload(monkeypatch: pytest.Monk
 
     expected = build_canonical_request_string(
         method="POST",
-        path="/v1/proofs/batch",
+        path="/v6/proofs/batch",
         timestamp="1700000000",
         nonce="nonce-42",
         raw_body=body,

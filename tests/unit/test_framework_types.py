@@ -21,3 +21,11 @@ def test_direct_batch_input_rejects_mismatch() -> None:
 def test_policy_run_request_requires_evidence() -> None:
     with pytest.raises(ValidationError):
         PolicyRunRequest(policy_id="lending_risk_v1")
+
+
+def test_policy_run_request_accepts_inline_evidence() -> None:
+    payload = PolicyRunRequest(
+        policy_id="lending_risk_v1",
+        evidence={"type": "inline", "payload": {"balances": [10], "limits": [5]}},
+    )
+    assert payload.evidence.type == "inline"

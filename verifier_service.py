@@ -21,7 +21,7 @@ from vellum_core.auth import AuthManager, BEARER_SCHEME
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.errors import APIError, register_exception_handlers
-from vellum_core.http_legacy import mark_legacy_api
+from vellum_core.http_auth import build_scoped_jwt_dependency
 from vellum_core.metrics import (
     observe_verify_duration,
     prometheus_payload,
@@ -34,14 +34,16 @@ from vellum_core.security import SecurityEventLogger
 from vellum_core.runtime import build_framework_client
 from vellum_core.schemas import (
     AuditChainVerifyResponse,
-    AttestationExportResponse,
+    AttestationResponseV6,
     CircuitsResponse,
     HealthResponse,
+    PolicyDescriptorV6,
     TrustSpeedResponse,
     VerifyRequest,
     VerifyResponse,
 )
 from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
+from vellum_core.versioning import HTTP_API_PREFIX, PACKAGE_VERSION
 
 
 settings = Settings.from_env()
@@ -84,7 +86,7 @@ integrity_service = VellumIntegrityService(
     audit_key_name=settings.vault_audit_key,
 )
 
-app = FastAPI(title="Vellum Verifier Service", version="5.0.0")
+app = FastAPI(title="Vellum Verifier Service", version=PACKAGE_VERSION)
 register_exception_handlers(app)
 init_telemetry(
     service_name=settings.app_name,
@@ -104,40 +106,24 @@ async def startup_event() -> None:
 
 def require_jwt_with_scopes(*scopes: str):
     """Build a JWT dependency that enforces one set of required scopes."""
-
-    async def _dependency(
-        credentials: HTTPAuthorizationCredentials | None = Depends(BEARER_SCHEME),
-    ) -> dict[str, Any]:
-        return await auth_manager.verify_jwt_credentials(
-            credentials,
-            required_scopes=set(scopes),
-        )
-
-    return _dependency
+    return build_scoped_jwt_dependency(auth_manager, *scopes)
 
 
-def _run_id_from_attestation_id(attestation_id: str) -> str:
-    """Extract run id from attestation id or raise APIError if format is invalid."""
-    if not attestation_id.startswith("att-"):
-        raise _unknown_attestation_id_error(attestation_id)
-    return attestation_id.removeprefix("att-")
-
-
-def _unknown_attestation_id_error(attestation_id: str) -> APIError:
-    """Return standardized unknown-attestation error payload."""
+def _unknown_run_id_error(run_id: str) -> APIError:
+    """Return standardized unknown-run error payload."""
     return APIError(
         status_code=404,
-        code="unknown_attestation_id",
-        message="Attestation id not found",
-        details={"attestation_id": attestation_id},
+        code="unknown_run_id",
+        message="No run found for id",
+        details={"run_id": run_id},
     )
 
 
-def _policy_id_from_job_metadata(*, attestation_id: str, metadata: dict[str, Any]) -> str:
-    """Resolve policy id from job metadata or raise standardized attestation error."""
+def _policy_id_from_job_metadata(*, run_id: str, metadata: dict[str, Any]) -> str:
+    """Resolve policy id from job metadata or raise standardized run error."""
     policy_id = metadata.get("policy_id")
     if not isinstance(policy_id, str) or policy_id == "":
-        raise _unknown_attestation_id_error(attestation_id)
+        raise _unknown_run_id_error(run_id)
     return policy_id
 
 
@@ -161,14 +147,12 @@ async def metrics(
     return Response(content=payload, media_type=content_type)
 
 
-@app.post("/v1/verify", response_model=VerifyResponse)
+@app.post(f"{HTTP_API_PREFIX}/verify", response_model=VerifyResponse)
 async def verify(
     payload: VerifyRequest,
-    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:write")),
 ) -> VerifyResponse:
     """Verify a proof tuple and append verification event to audit chain."""
-    mark_legacy_api(response)
     started = time.perf_counter()
     result = await framework.proof_engine.verify(
         EngineVerificationRequest(
@@ -205,13 +189,11 @@ async def verify(
     )
 
 
-@app.get("/v1/circuits", response_model=CircuitsResponse)
+@app.get(f"{HTTP_API_PREFIX}/circuits", response_model=CircuitsResponse)
 async def list_circuits(
-    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("proofs:read")),
 ) -> CircuitsResponse:
     """Return circuit artifact readiness list from framework manager."""
-    mark_legacy_api(response)
     return CircuitsResponse(
         circuits=[
             entry.model_dump()
@@ -220,41 +202,37 @@ async def list_circuits(
     )
 
 
-@app.get("/v1/audit/verify-chain", response_model=AuditChainVerifyResponse)
+@app.get(f"{HTTP_API_PREFIX}/audit/verify-chain", response_model=AuditChainVerifyResponse)
 async def verify_audit_chain(
-    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("audit:read")),
 ) -> AuditChainVerifyResponse:
     """Verify full audit-chain integrity."""
-    mark_legacy_api(response)
     report = await integrity_service.verify_chain()
     return AuditChainVerifyResponse.model_validate(report)
 
 
-@app.get("/v1/trust-speed", response_model=TrustSpeedResponse)
+@app.get(f"{HTTP_API_PREFIX}/trust-speed", response_model=TrustSpeedResponse)
 async def trust_speed(
-    response: Response,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("audit:read")),
 ) -> TrustSpeedResponse:
     """Return trust-speed snapshot from verification metrics."""
-    mark_legacy_api(response)
     return TrustSpeedResponse.model_validate(trust_speed_snapshot())
 
 
-@app.get("/v5/attestations/{attestation_id}", response_model=AttestationExportResponse)
+@app.get(f"{HTTP_API_PREFIX}/runs/{{run_id}}/attestation", response_model=AttestationResponseV6)
 async def export_attestation(
-    attestation_id: str,
+    run_id: str,
     _: dict[str, Any] = Depends(require_jwt_with_scopes("audit:read")),
-) -> AttestationExportResponse:
-    """Export compliance attestation bundle for one completed policy run."""
-    run_id = _run_id_from_attestation_id(attestation_id)
+) -> AttestationResponseV6:
+    """Export v6 attestation bundle for one completed run resource."""
+    attestation_id = f"att-{run_id}"
     job = await db.get_proof_job(run_id)
     if job is None:
-        raise _unknown_attestation_id_error(attestation_id)
+        raise _unknown_run_id_error(run_id)
 
     metadata = job.meta or {}
     policy_id = _policy_id_from_job_metadata(
-        attestation_id=attestation_id,
+        run_id=run_id,
         metadata=metadata,
     )
     decision = metadata.get("decision")
@@ -279,18 +257,16 @@ async def export_attestation(
     rows = await db.list_audit_rows_for_proof(proof_id=run_id)
     chain = signature_chain(rows)
 
-    return AttestationExportResponse(
+    return AttestationResponseV6(
         attestation_id=attestation_id,
         run_id=run_id,
-        policy_id=policy_id,
-        policy_version=policy_version,
+        policy=PolicyDescriptorV6(id=policy_id, version=policy_version),
         circuit_id=job.circuit_id,
         decision="pass" if decision == "pass" else "fail",
         proof_hash=proof_hash,
         public_signals_hash=public_signals_hash,
         artifact_digests=artifact_digest_map,
         signature_chain=chain,
-        metadata=metadata,
         exported_at=datetime.now(timezone.utc),
     )
 

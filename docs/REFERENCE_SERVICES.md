@@ -15,13 +15,13 @@ The reference deployment is an operational blueprint built on top of the SDK.
 - `prover`, `worker`, and `verifier` depend on successful `framework-init` completion.
 - Rebuild artifacts on demand with: `docker compose run --rm framework-init`
 
-## Primary v5 Endpoints
+## Primary v6 Endpoints
 
 - Prover:
-  - `POST /v5/policy-runs`
-  - `GET /v5/policy-runs/{run_id}`
+  - `POST /v6/runs`
+  - `GET /v6/runs/{run_id}`
 - Verifier:
-  - `GET /v5/attestations/{attestation_id}`
+  - `GET /v6/runs/{run_id}/attestation`
 
 ## Intended Use
 

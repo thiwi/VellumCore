@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from vellum_core.logic.batcher import MAX_BATCH_SIZE
+from vellum_core.run_contract import RunCreateRequestV6
 
 DEFAULT_BATCH_CIRCUIT_ID = "batch_credit_check"
 
@@ -28,12 +30,8 @@ class BatchProveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     circuit_id: str = Field(default=DEFAULT_BATCH_CIRCUIT_ID, min_length=1, max_length=128)
-    balances: list[int] | None = Field(
-        default=None, min_length=1, max_length=MAX_BATCH_SIZE
-    )
-    limits: list[int] | None = Field(
-        default=None, min_length=1, max_length=MAX_BATCH_SIZE
-    )
+    balances: list[int] | None = Field(default=None, min_length=1, max_length=MAX_BATCH_SIZE)
+    limits: list[int] | None = Field(default=None, min_length=1, max_length=MAX_BATCH_SIZE)
     private_input: dict[str, Any] | None = None
     request_id: str | None = None
 
@@ -45,9 +43,7 @@ class BatchProveRequest(BaseModel):
 
         modes = int(using_balances_limits) + int(using_private_input)
         if modes != 1:
-            raise ValueError(
-                "Provide exactly one input mode: balances/limits or private_input"
-            )
+            raise ValueError("Provide exactly one input mode: balances/limits or private_input")
 
         if using_balances_limits:
             if self.balances is None or self.limits is None:
@@ -139,60 +135,79 @@ class CircuitsResponse(BaseModel):
     circuits: list[CircuitArtifactStatus]
 
 
-class PolicyRunRequest(BaseModel):
-    """Policy-run submission request for v5 domain-oriented endpoints."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    policy_id: str = Field(default="lending_risk_v1", min_length=1, max_length=128)
-    evidence_payload: dict[str, Any] | None = None
-    evidence_ref: str | None = None
-    context: dict[str, Any] = Field(default_factory=dict)
-    request_id: str | None = None
-
-    @model_validator(mode="after")
-    def validate_evidence_input(self) -> "PolicyRunRequest":
-        if self.evidence_payload is None and self.evidence_ref is None:
-            raise ValueError("Provide evidence_payload or evidence_ref")
-        return self
-
-
-class PolicyRunAcceptedResponse(BaseModel):
-    """Asynchronous policy-run submission acknowledgment."""
+class RunCreateAcceptedResponseV6(BaseModel):
+    """Asynchronous v6 run-submission acknowledgement."""
 
     run_id: str
     policy_id: str
-    status: str
+    lifecycle_state: Literal["queued"]
     attestation_id: str
 
 
-class PolicyRunStatusResponse(BaseModel):
-    """Status payload for one persisted policy run."""
+class RunErrorV6(BaseModel):
+    """Typed run failure payload used by v6 run status responses."""
+
+    code: str
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunStatusResponseV6(BaseModel):
+    """Status payload for one persisted v6 run resource."""
 
     run_id: str
     policy_id: str
-    status: str
+    lifecycle_state: Literal["queued", "running", "completed", "failed"]
     circuit_id: str
     decision: Literal["pass", "fail"] | None = None
     attestation_id: str
     evidence_ref: str | None = None
-    metadata: dict[str, Any] | None = None
-    created_at: datetime
+    client_request_id: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+    error: RunErrorV6 | None = None
+    submitted_at: datetime
     updated_at: datetime
 
 
-class AttestationExportResponse(BaseModel):
-    """Exportable attestation bundle payload for policy runs."""
+class PolicyDescriptorV6(BaseModel):
+    """Policy descriptor embedded in v6 attestation responses."""
+
+    id: str
+    version: str
+
+
+class AttestationResponseV6(BaseModel):
+    """Exportable v6 attestation bundle payload for run resources."""
 
     attestation_id: str
     run_id: str
-    policy_id: str
-    policy_version: str
+    policy: PolicyDescriptorV6
     circuit_id: str
     decision: Literal["pass", "fail"]
     proof_hash: str
     public_signals_hash: str
     artifact_digests: dict[str, str]
     signature_chain: list[dict[str, Any]]
-    metadata: dict[str, Any]
     exported_at: datetime
+
+
+__all__ = [
+    "AuditChainVerifyResponse",
+    "AttestationResponseV6",
+    "BatchProveRequest",
+    "CircuitArtifactStatus",
+    "CircuitManifest",
+    "CircuitsResponse",
+    "DEFAULT_BATCH_CIRCUIT_ID",
+    "HealthResponse",
+    "PolicyDescriptorV6",
+    "ProofStatusResponse",
+    "ProveAcceptedResponse",
+    "RunCreateAcceptedResponseV6",
+    "RunCreateRequestV6",
+    "RunErrorV6",
+    "RunStatusResponseV6",
+    "TrustSpeedResponse",
+    "VerifyRequest",
+    "VerifyResponse",
+]

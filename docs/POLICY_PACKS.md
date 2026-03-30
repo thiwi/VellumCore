@@ -1,6 +1,6 @@
 # Policy Packs
 
-Policy packs define domain behavior for v5 policy runs.
+Policy packs define domain behavior for v6 run resources.
 
 ## Layout
 
@@ -52,8 +52,9 @@ Current compiler support for generated decision logic:
 - circuit: `batch_credit_check`
 - reference policy: `lending_risk_reference_v1`
 - evidence modes:
-  - `evidence_payload.private_input`
-  - `evidence_payload.balances` + `evidence_payload.limits`
+  - `evidence.type=inline` + `evidence.payload.private_input`
+  - `evidence.type=inline` + `evidence.payload.balances` + `evidence.payload.limits`
+  - `evidence.type=ref` + pre-stored evidence reference
 - decision mapping:
   - `public_signals[0] == "1"` => `pass`
   - otherwise => `fail`
@@ -63,8 +64,9 @@ Current compiler support for generated decision logic:
 - circuit: `batch_credit_check`
 - reference policy: `lending_risk_portfolio_reference_v1`
 - evidence modes:
-  - `evidence_payload.private_input`
-  - `evidence_payload.balances` + `evidence_payload.limits`
+  - `evidence.type=inline` + `evidence.payload.private_input`
+  - `evidence.type=inline` + `evidence.payload.balances` + `evidence.payload.limits`
+  - `evidence.type=ref` + pre-stored evidence reference
 - decision mapping:
   - `public_signals[0] == "1"` => `pass`
   - otherwise => `fail`

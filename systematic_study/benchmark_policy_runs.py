@@ -1,4 +1,4 @@
-"""Benchmark v5 policy-run latency distribution for one active provider mode."""
+"""Benchmark v6 run latency distribution for one active provider mode."""
 
 from __future__ import annotations
 
@@ -90,8 +90,8 @@ def _wait_health(base_url: str, *, timeout_seconds: float) -> None:
 
 
 def _submit_policy_run(client: httpx.Client, base_url: str, payload: dict[str, Any]) -> str:
-    response = client.post(f"{base_url}/api/v5/policy-runs", json=payload, timeout=30.0)
-    if response.status_code != 200:
+    response = client.post(f"{base_url}/api/v6/runs", json=payload, timeout=30.0)
+    if response.status_code != 202:
         raise RuntimeError(
             f"policy submit failed: status={response.status_code} body={response.text}"
         )
@@ -112,17 +112,58 @@ def _wait_policy_run(
 ) -> dict[str, Any]:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        response = client.get(f"{base_url}/api/v5/policy-runs/{run_id}", timeout=20.0)
+        response = client.get(f"{base_url}/api/v6/runs/{run_id}", timeout=20.0)
         if response.status_code != 200:
             raise RuntimeError(
                 f"status lookup failed for run_id={run_id}: "
                 f"status={response.status_code} body={response.text}"
             )
         body = response.json()
-        if body.get("status") in {"completed", "failed"}:
+        if body.get("lifecycle_state") in {"completed", "failed"}:
             return body
         time.sleep(poll_interval_seconds)
     raise RuntimeError(f"timeout waiting for policy run completion: {run_id}")
+
+
+def _build_v6_payload(*, base_payload: dict[str, Any], client_request_id: str) -> dict[str, Any]:
+    """Normalize historical benchmark payloads into v6 run-create contract."""
+    if "evidence" in base_payload:
+        payload = dict(base_payload)
+        payload["client_request_id"] = client_request_id
+        payload.setdefault("context", {})
+        return payload
+
+    policy_id = str(base_payload.get("policy_id", "lending_risk_v1"))
+    context_value = base_payload.get("context")
+    context = context_value if isinstance(context_value, dict) else {}
+    evidence_ref = base_payload.get("evidence_ref")
+    if isinstance(evidence_ref, str) and evidence_ref:
+        evidence: dict[str, Any] = {"type": "ref", "ref": evidence_ref}
+    else:
+        evidence_payload = base_payload.get("evidence_payload")
+        if not isinstance(evidence_payload, dict):
+            filtered = {
+                key: value
+                for key, value in base_payload.items()
+                if key
+                not in {
+                    "policy_id",
+                    "context",
+                    "request_id",
+                    "client_request_id",
+                    "evidence_payload",
+                    "evidence_ref",
+                }
+            }
+            evidence_payload = filtered
+        evidence = {"type": "inline", "payload": evidence_payload}
+
+    return {
+        "policy_id": policy_id,
+        "evidence": evidence,
+        "context": context,
+        "client_request_id": client_request_id,
+    }
 
 
 def main() -> int:
@@ -139,8 +180,10 @@ def main() -> int:
 
     with httpx.Client() as client:
         for index in range(args.runs):
-            run_payload = json.loads(json.dumps(payload))
-            run_payload["request_id"] = f"bench-{args.mode_label}-{index}-{uuid4()}"
+            run_payload = _build_v6_payload(
+                base_payload=json.loads(json.dumps(payload)),
+                client_request_id=f"bench-{args.mode_label}-{index}-{uuid4()}",
+            )
 
             start = time.perf_counter()
             run_id = _submit_policy_run(client, args.base_url, run_payload)
@@ -153,14 +196,15 @@ def main() -> int:
             )
             elapsed_ms = (time.perf_counter() - start) * 1000.0
 
-            if status.get("status") == "completed":
+            if status.get("lifecycle_state") == "completed":
                 latencies_ms.append(elapsed_ms)
             else:
                 failed_runs.append(
                     {
                         "run_id": run_id,
-                        "status": status.get("status"),
-                        "metadata": status.get("metadata"),
+                        "lifecycle_state": status.get("lifecycle_state"),
+                        "decision": status.get("decision"),
+                        "error": status.get("error"),
                     }
                 )
 

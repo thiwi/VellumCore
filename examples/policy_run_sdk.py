@@ -12,7 +12,7 @@ async def main() -> None:
     result = await framework.policy_engine.run(
         PolicyRunRequest(
             policy_id="lending_risk_v1",
-            evidence_payload={"balances": [120], "limits": [100]},
+            evidence={"type": "inline", "payload": {"balances": [120], "limits": [100]}},
             context={"tenant": "acme-bank", "workflow": "onboarding"},
         )
     )

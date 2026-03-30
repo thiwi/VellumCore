@@ -9,7 +9,7 @@
    - `python -m pytest -m unit`
    - `python -m pytest -m integration`
    - `ruff check .`
-   - `mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py`
+   - `mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py`
 
 ## PR expectations
 
@@ -21,7 +21,7 @@
 ## Commit and release notes
 
 - Add changelog entries for user-facing changes.
-- Breaking changes must include migration notes in `docs/MIGRATION_V4_TO_V5.md`.
+- Breaking changes must include migration notes in `docs/MIGRATIONS.md`.
 
 ## Security and disclosure
 

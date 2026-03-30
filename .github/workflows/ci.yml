@@ -63,7 +63,6 @@ jobs:
           vellum_core/api/attestation_service.py
           vellum_core/api/policy_engine.py
           vellum_core/policy_registry.py
-          vellum_core/policy_runtime.py
 
   unit_tests:
     runs-on: ubuntu-latest
@@ -191,7 +190,8 @@ jobs:
       - name: Verify release artifacts
         run: |
           test -f CHANGELOG.md
-          test -f docs/MIGRATION_V4_TO_V5.md
+          test -f docs/MIGRATIONS.md
+          ls docs/MIGRATION_*.md
           ls docs/releases/*.md
 
   security_scan:

@@ -1,4 +1,4 @@
-"""Tests for Verifier v5 routes."""
+"""Tests for Verifier v6 routes."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def _patch_audit_read_auth(monkeypatch: pytest.MonkeyPatch, verifier_service: An
 
 
 @pytest.mark.integration
-def test_v5_attestation_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_v6_attestation_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     verifier_service = _load_verifier_service(monkeypatch)
     _patch_audit_read_auth(monkeypatch, verifier_service)
 
@@ -113,7 +113,7 @@ def test_v5_attestation_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
     client = TestClient(verifier_service.app)
     response = client.get(
-        "/v5/attestations/att-run-1",
+        "/v6/runs/run-1/attestation",
         headers={"Authorization": "Bearer demo"},
     )
 
@@ -121,44 +121,45 @@ def test_v5_attestation_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     body = response.json()
     assert body["attestation_id"] == "att-run-1"
     assert body["decision"] == "pass"
-    assert body["policy_version"] == "1.0.0"
+    assert body["policy"]["version"] == "1.0.0"
     assert body["artifact_digests"]["wasm_sha256"]
     assert body["signature_chain"][0]["entry_hash"] == "entry-hash"
 
 
 @pytest.mark.integration
-def test_v1_trust_speed_returns_legacy_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v6_trust_speed(monkeypatch: pytest.MonkeyPatch) -> None:
     verifier_service = _load_verifier_service(monkeypatch)
     _patch_audit_read_auth(monkeypatch, verifier_service)
 
     client = TestClient(verifier_service.app)
-    response = client.get("/v1/trust-speed", headers={"Authorization": "Bearer demo"})
+    response = client.get("/v6/trust-speed", headers={"Authorization": "Bearer demo"})
 
     assert response.status_code == 200
-    assert response.headers["Deprecation"] == "true"
-    assert response.headers["Sunset"] == "Tue, 30 Sep 2026 00:00:00 GMT"
-    assert "MIGRATION_V4_TO_V5" in response.headers["Link"]
 
 
 @pytest.mark.integration
-def test_v5_attestation_export_rejects_invalid_attestation_id(
+def test_v6_attestation_export_rejects_unknown_run_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verifier_service = _load_verifier_service(monkeypatch)
     _patch_audit_read_auth(monkeypatch, verifier_service)
+    async def fake_get_proof_job(_run_id: str) -> Any:
+        return None
+
+    monkeypatch.setattr(verifier_service.db, "get_proof_job", fake_get_proof_job, raising=False)
 
     client = TestClient(verifier_service.app)
     response = client.get(
-        "/v5/attestations/not-an-attestation-id",
+        "/v6/runs/not-a-run/attestation",
         headers={"Authorization": "Bearer demo"},
     )
 
     assert response.status_code == 404
-    assert response.json()["error"]["code"] == "unknown_attestation_id"
+    assert response.json()["error"]["code"] == "unknown_run_id"
 
 
 @pytest.mark.integration
-def test_v5_attestation_export_requires_policy_id_metadata(
+def test_v6_attestation_export_requires_policy_id_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verifier_service = _load_verifier_service(monkeypatch)
@@ -177,9 +178,9 @@ def test_v5_attestation_export_requires_policy_id_metadata(
 
     client = TestClient(verifier_service.app)
     response = client.get(
-        "/v5/attestations/att-run-2",
+        "/v6/runs/run-2/attestation",
         headers={"Authorization": "Bearer demo"},
     )
 
     assert response.status_code == 404
-    assert response.json()["error"]["code"] == "unknown_attestation_id"
+    assert response.json()["error"]["code"] == "unknown_run_id"

@@ -97,7 +97,7 @@ def _realistic_policy_payload(*, size: int = 64) -> dict[str, Any]:
 
 
 def _submit_policy(payload: dict[str, Any]) -> dict[str, Any]:
-    response = httpx.post("http://localhost:8000/api/v5/policy-runs", json=payload, timeout=30.0)
+    response = httpx.post("http://localhost:8000/api/v6/runs", json=payload, timeout=30.0)
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -105,10 +105,10 @@ def _submit_policy(payload: dict[str, Any]) -> dict[str, Any]:
 def _wait_policy_status(run_id: str, timeout: int = 180) -> dict[str, Any]:
     started = time.time()
     while time.time() - started < timeout:
-        response = httpx.get(f"http://localhost:8000/api/v5/policy-runs/{run_id}", timeout=20.0)
+        response = httpx.get(f"http://localhost:8000/api/v6/runs/{run_id}", timeout=20.0)
         assert response.status_code == 200, response.text
         body = response.json()
-        if body["status"] in {"completed", "failed"}:
+        if body["lifecycle_state"] in {"completed", "failed"}:
             return body
         time.sleep(2)
     raise AssertionError(f"policy run {run_id} did not complete")
@@ -228,7 +228,7 @@ def test_dual_track_mismatch_hard_fail_and_restore(compose_stack: None) -> None:
         submitted = _submit_policy(_realistic_policy_payload(size=72))
         mismatch_run_id = submitted["run_id"]
         failed = _wait_policy_status(mismatch_run_id, timeout=180)
-        assert failed["status"] == "failed"
+        assert failed["lifecycle_state"] == "failed"
         assert failed["decision"] is None
 
         worker_logs = _compose_capture("logs", "worker", "--since", "5m").stdout
@@ -241,5 +241,5 @@ def test_dual_track_mismatch_hard_fail_and_restore(compose_stack: None) -> None:
 
     recovered_submit = _submit_policy(_realistic_policy_payload(size=72))
     recovered = _wait_policy_status(recovered_submit["run_id"], timeout=180)
-    assert recovered["status"] == "completed"
+    assert recovered["lifecycle_state"] == "completed"
     assert recovered["decision"] == "pass"

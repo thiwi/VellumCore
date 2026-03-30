@@ -60,7 +60,7 @@ docker compose run --rm framework-init
 
 ### Audit chain invalid
 
-- Run `GET /v1/audit/verify-chain` and inspect first broken index.
+- Run `GET /v6/audit/verify-chain` and inspect first broken index.
 - Investigate signing key version changes and entry ordering.
 - Avoid manual DB edits to `audit_log`.
 

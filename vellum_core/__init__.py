@@ -1,5 +1,7 @@
 """Vellum Core package metadata."""
 
+from vellum_core.versioning import PACKAGE_VERSION
+
 __all__ = ["__version__"]
 
-__version__ = "4.0.0"
+__version__ = PACKAGE_VERSION

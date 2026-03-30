@@ -41,14 +41,14 @@ RUN_E2E=1 python -m pytest -m e2e -q
 
 Contract snapshots:
 
-- Contract tests compare v5 HTTP/model schemas against files in `tests/contracts/snapshots/`.
+- Contract tests compare v6 HTTP/model schemas against files in `tests/contracts/snapshots/`.
 - If an intentional API contract change is made, update those snapshots in the same PR.
 
 Static checks:
 
 ```bash
 ruff check .
-mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py
 python scripts/sync_requirements.py check
 ```
 

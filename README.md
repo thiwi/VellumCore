@@ -13,7 +13,7 @@ Vellum Core focuses on regulated fintech workflows:
 - signed audit chain and evidence traceability
 - reference services for prover, worker, verifier, and operations dashboard
 
-## v5 Surface (Primary)
+## v6 Surface (Primary)
 
 Framework contract:
 
@@ -23,11 +23,11 @@ Framework contract:
 
 Primary domain objects:
 
-- `PolicyRunRequest { policy_id, evidence_payload|evidence_ref, context }`
+- `RunCreateRequestV6 { policy_id, evidence:{inline|ref}, context, client_request_id }`
 - `PolicyRunResult { run_id, policy_id, decision, attestation_id, timings }`
 - `AttestationBundle { policy_version, circuit_id, proof_hash, public_signals_hash, artifact_digests, signature_chain }`
 
-## SDK Quick Start (v5)
+## SDK Quick Start (v6)
 
 ```python
 from vellum_core.api import FrameworkClient, PolicyRunRequest
@@ -36,7 +36,7 @@ framework = FrameworkClient.from_env()
 result = await framework.policy_engine.run(
     PolicyRunRequest(
         policy_id="lending_risk_v1",
-        evidence_payload={"balances": [120], "limits": [100]},
+        evidence={"type": "inline", "payload": {"balances": [120], "limits": [100]}},
         context={"tenant": "acme-bank"},
     )
 )
@@ -53,16 +53,14 @@ Start full stack:
 
 `framework-init` now prepares required circuit artifacts during compose startup.
 
-v5 endpoints:
+v6 endpoints:
 
-- Prover: `POST /v5/policy-runs`, `GET /v5/policy-runs/{run_id}`
-- Verifier: `GET /v5/attestations/{attestation_id}`
+- Prover: `POST /v6/runs`, `GET /v6/runs/{run_id}`
+- Verifier: `GET /v6/runs/{run_id}/attestation`
 - Dashboard proxies:
-  - `POST /api/v5/policy-runs`
-  - `GET /api/v5/policy-runs/{run_id}`
-  - `GET /api/v5/attestations/{attestation_id}`
-
-Legacy v1 endpoints remain available with deprecation headers and sunset metadata.
+  - `POST /api/v6/runs`
+  - `GET /api/v6/runs/{run_id}`
+  - `GET /api/v6/runs/{run_id}/attestation`
 
 ## Development
 
@@ -76,7 +74,7 @@ Run checks:
 
 ```bash
 ruff check .
-mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py
 python scripts/sync_requirements.py check
 python -m pytest -m unit
 python -m pytest -m integration
@@ -218,6 +216,6 @@ RUNS=40 DAYS_OBSERVED=0 COMPARED_RUNS=0 FUNCTIONAL_MISMATCHES=0 \
 
 - Documentation index: [docs/README.md](docs/README.md)
 - CI and quality gates: [docs/CI.md](docs/CI.md)
-- Migration notes: [docs/MIGRATION_V4_TO_V5.md](docs/MIGRATION_V4_TO_V5.md)
+- Migration notes: [docs/MIGRATIONS.md](docs/MIGRATIONS.md)
 - API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

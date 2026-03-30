@@ -15,7 +15,8 @@ integrators, and contributors.
 8. [Provider Cutover Gate](CUTOVER.md)
 9. [CI and Quality Gates](CI.md)
 10. [Security Model](SECURITY.md)
-11. [Migration v4 to v5](MIGRATION_V4_TO_V5.md)
+11. [Migrations Index](MIGRATIONS.md)
+12. [Migration v5 to v6](MIGRATION_V5_TO_V6.md)
 
 ## Existing Policy Docs
 
@@ -23,4 +24,4 @@ integrators, and contributors.
 - [Reference Services Scope](REFERENCE_SERVICES.md)
 - [Compatibility Policy](COMPATIBILITY.md)
 - [Release Checklist](RELEASE_CHECKLIST.md)
-- [Release Notes](releases/v5.0.0-rc1.md)
+- [Release Notes](releases/v6.0.0.md)

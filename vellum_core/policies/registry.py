@@ -3,21 +3,12 @@
 from __future__ import annotations
 
 import importlib
-import os
 import pkgutil
 from dataclasses import dataclass, field
 
 from vellum_core.api.errors import framework_error
 from vellum_core.policies import generated as generated_policies_pkg
 from vellum_core.policies.base import ReferencePolicy
-from vellum_core.policies.lending_risk import LendingRiskReferencePolicy
-
-LEGACY_FALLBACK_ENV = "POLICY_REFERENCE_LEGACY_FALLBACK"
-
-
-def _legacy_fallback_enabled() -> bool:
-    raw = os.getenv(LEGACY_FALLBACK_ENV, "true").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -39,7 +30,7 @@ class ReferencePolicyRegistry:
         return policy
 
     def refresh(self, *, reload_modules: bool = False) -> None:
-        """Rebuild registry from generated policy modules and legacy fallback."""
+        """Rebuild registry from generated policy modules."""
         self._registry = _build_reference_registry(reload_modules=reload_modules)
 
     def list_reference_policies(self) -> list[str]:
@@ -54,15 +45,9 @@ class ReferencePolicyRegistry:
 
 
 def _build_reference_registry(*, reload_modules: bool) -> dict[str, ReferencePolicy]:
-    registry: dict[str, ReferencePolicy] = _load_generated_reference_policies(
+    return _load_generated_reference_policies(
         reload_modules=reload_modules
     )
-    if _legacy_fallback_enabled():
-        registry.setdefault(
-            LendingRiskReferencePolicy.reference_policy,
-            LendingRiskReferencePolicy(),
-        )
-    return registry
 
 
 def _load_generated_reference_policies(*, reload_modules: bool) -> dict[str, ReferencePolicy]:

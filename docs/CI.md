@@ -74,7 +74,7 @@ Run CI-equivalent checks:
 
 ```bash
 ruff check .
-mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py vellum_core/policy_runtime.py
+mypy --follow-imports=skip --ignore-missing-imports vellum_core/api/attestation_service.py vellum_core/api/policy_engine.py vellum_core/policy_registry.py
 python scripts/sync_requirements.py check
 python -m pytest -m unit
 python -m pytest -m integration
