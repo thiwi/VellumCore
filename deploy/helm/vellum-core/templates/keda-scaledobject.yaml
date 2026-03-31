@@ -1,0 +1,17 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "vellum-core.fullname" . }}-worker
+spec:
+  scaleTargetRef:
+    name: {{ include "vellum-core.fullname" . }}-worker
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  triggers:
+  - type: redis
+    metadata:
+      address: {{ printf "%s:%v" .Values.externalDependencies.redis.host 6379 | quote }}
+      listName: {{ .Values.keda.queueName | quote }}
+      listLength: {{ .Values.keda.listLength | quote }}
+{{- end }}

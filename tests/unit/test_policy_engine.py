@@ -11,6 +11,7 @@ import pytest
 from vellum_core.api import AttestationService, CircuitManager, PolicyEngine, ProofEngine
 from vellum_core.api.errors import FrameworkError
 from vellum_core.api.types import PolicyRunRequest
+from vellum_core.policy_parameters import PolicyParameterStore
 from vellum_core.policy_registry import PolicyRegistry
 from vellum_core.registry import CircuitRegistry
 from vellum_core.runtime.testing import (
@@ -81,6 +82,7 @@ def test_policy_engine_run_and_export(tmp_path: Path) -> None:
     engine = PolicyEngine(
         proof_engine=proof_engine,
         policy_registry=PolicyRegistry(policy_packs_dir),
+        policy_parameter_store=PolicyParameterStore(policy_packs_dir=policy_packs_dir),
         evidence_store=evidence_store,
         attestation_service=attestation_service,
     )
@@ -120,6 +122,7 @@ def test_policy_engine_rejects_unknown_policy(tmp_path: Path) -> None:
     engine = PolicyEngine(
         proof_engine=proof_engine,
         policy_registry=PolicyRegistry(policy_packs_dir),
+        policy_parameter_store=PolicyParameterStore(policy_packs_dir=policy_packs_dir),
         evidence_store=InMemoryEvidenceStore(),
         attestation_service=AttestationService(
             artifact_store=artifacts,
@@ -223,6 +226,7 @@ def test_policy_engine_hard_fails_on_dual_track_mismatch(tmp_path: Path) -> None
     engine = PolicyEngine(
         proof_engine=proof_engine,
         policy_registry=PolicyRegistry(policy_packs_dir),
+        policy_parameter_store=PolicyParameterStore(policy_packs_dir=policy_packs_dir),
         evidence_store=evidence_store,
         attestation_service=attestation_service,
     )

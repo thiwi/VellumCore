@@ -1,0 +1,11 @@
+1. Prover service:
+   kubectl get svc {{ include "vellum-core.fullname" . }}-prover
+
+2. Verifier service:
+   kubectl get svc {{ include "vellum-core.fullname" . }}-verifier
+
+3. Native prover gRPC:
+   kubectl get svc {{ include "vellum-core.fullname" . }}-native-prover
+
+4. Validate framework init hook job:
+   kubectl get jobs | grep {{ include "vellum-core.fullname" . }}-framework-init

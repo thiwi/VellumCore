@@ -19,6 +19,7 @@ integrators, and contributors.
 12. [Migrations Index](MIGRATIONS.md)
 13. [Migration v5 to v6](MIGRATION_V5_TO_V6.md)
 14. [Runtime grpc-only Migration](MIGRATION_V6_TO_V7_RUNTIME.md)
+15. Helm chart: `deploy/helm/vellum-core/README.md`
 
 ## Existing Policy Docs
 

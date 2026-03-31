@@ -20,6 +20,7 @@ from vellum_core.policies.dual_track import (
     evaluate_circuit_track,
     prepare_reference_track,
 )
+from vellum_core.policy_parameters import PolicyParameterStore, compute_policy_params_hash
 from vellum_core.policy_registry import PolicyNotFoundError, PolicyRegistry
 from vellum_core.run_contract import EvidenceInlineV6, EvidenceRefV6
 from vellum_core.spi import EvidenceStore
@@ -33,11 +34,13 @@ class PolicyEngine:
         *,
         proof_engine: ProofEngine,
         policy_registry: PolicyRegistry,
+        policy_parameter_store: PolicyParameterStore,
         evidence_store: EvidenceStore,
         attestation_service: AttestationService,
     ) -> None:
         self.proof_engine = proof_engine
         self.policy_registry = policy_registry
+        self.policy_parameter_store = policy_parameter_store
         self.evidence_store = evidence_store
         self.attestation_service = attestation_service
 
@@ -55,11 +58,18 @@ class PolicyEngine:
         run_id = str(uuid4())
         attestation_id = f"att-{run_id}"
         evidence_payload, evidence_ref = await self._resolve_evidence(run_id=run_id, request=request)
+        policy_parameters = self.policy_parameter_store.resolve(
+            policy_id=request.policy_id,
+            policy_params_ref=request.policy_params_ref,
+        )
+        effective_payload = dict(evidence_payload)
+        if policy_parameters:
+            effective_payload["policy_parameters"] = policy_parameters
 
         reference_result = prepare_reference_track(
             reference_policy=manifest.reference_policy,
             differential_outputs=manifest.differential_outputs,
-            evidence_payload=evidence_payload,
+            evidence_payload=effective_payload,
         )
 
         started = time.perf_counter()
@@ -107,6 +117,10 @@ class PolicyEngine:
             metadata={
                 "context": request.context,
                 "evidence_ref": evidence_ref,
+                "policy_params_ref": request.policy_params_ref,
+                "policy_params_hash": compute_policy_params_hash(policy_parameters)
+                if policy_parameters
+                else None,
                 "dual_track": {
                     "reference_outputs": reference_result.outputs,
                     "circuit_outputs": circuit_result.outputs,

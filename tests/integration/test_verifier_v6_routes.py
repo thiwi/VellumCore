@@ -73,7 +73,12 @@ def test_v6_attestation_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             proof={"pi_a": ["1"]},
             public_signals=["1"],
             circuit_id="batch_credit_check",
-            meta={"policy_id": "lending_risk_v1", "decision": "pass"},
+            meta={
+                "policy_id": "lending_risk_v1",
+                "decision": "pass",
+                "policy_params_ref": "bank_a",
+                "policy_params_hash": "hash-123",
+            },
         )
 
     async def fake_list_audit_rows_for_proof(*, proof_id: str) -> list[Any]:
@@ -124,6 +129,8 @@ def test_v6_attestation_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert body["policy"]["version"] == "1.0.0"
     assert body["artifact_digests"]["wasm_sha256"]
     assert body["signature_chain"][0]["entry_hash"] == "entry-hash"
+    assert body["metadata"]["policy_params_ref"] == "bank_a"
+    assert body["metadata"]["policy_params_hash"] == "hash-123"
 
 
 @pytest.mark.integration

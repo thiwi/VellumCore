@@ -280,6 +280,10 @@ async def export_attestation(
         public_signals_hash=public_signals_hash,
         artifact_digests=artifact_digest_map,
         signature_chain=chain,
+        metadata={
+            "policy_params_ref": metadata.get("policy_params_ref"),
+            "policy_params_hash": metadata.get("policy_params_hash"),
+        },
         exported_at=datetime.now(timezone.utc),
     )
 

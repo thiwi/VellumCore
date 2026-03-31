@@ -1,0 +1,24 @@
+{
+  "decision_kind": "all",
+  "policy_id": "lending_risk_v1",
+  "policy_parameters": [],
+  "reference_policy": "lending_risk_reference_v1",
+  "rules": [
+    {
+      "input_refs": [
+        "balances",
+        "limits"
+      ],
+      "left": {
+        "ref": "balances"
+      },
+      "operator": ">",
+      "policy_path": "decision.inner",
+      "right": {
+        "ref": "limits"
+      },
+      "rule_id": "rule_cmp_0"
+    }
+  ],
+  "spec_hash": "52a4be58db6dccfd381bd33e7508b77ca6cd2a4187ddebf0a55e1bf645f6bf6a"
+}

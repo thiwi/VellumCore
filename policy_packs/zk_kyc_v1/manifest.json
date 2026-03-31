@@ -1,0 +1,31 @@
+{
+  "policy_id": "zk_kyc_v1",
+  "policy_version": "1.0.0",
+  "circuit_id": "zk_kyc_v1",
+  "description": "Zero-knowledge KYC policy proving age + country eligibility.",
+  "input_contract": {
+    "mode": "private_input_or_inline",
+    "required_fields": ["age", "country_code", "min_age", "allowed_country_code"]
+  },
+  "evidence_contract": {
+    "type": "json",
+    "schema_hint": "Provide age/country claims and public policy thresholds."
+  },
+  "reference_policy": "zk_kyc_reference_v1",
+  "primitives": [
+    "SafeSub",
+    "MerkleProof",
+    "ActiveCountBounds"
+  ],
+  "differential_outputs": {
+    "kyc_ok": {
+      "signal_index": 0,
+      "value_type": "bool"
+    }
+  },
+  "compiler_metadata": {},
+  "expected_attestation": {
+    "decision_signal_index": 0,
+    "pass_signal_value": "1"
+  }
+}

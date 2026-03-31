@@ -12,6 +12,7 @@ class CompilerArtifacts:
     spec_hash: str
     python_source: str
     circom_source: str
+    debug_trace_source: str
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class CompilerMetadata:
     generated_from_hash: str
     generated_python_path: str
     generated_circom_path: str
+    generated_debug_trace_path: str
 
     def as_dict(self) -> dict[str, str]:
         """Serialize metadata for JSON manifest embedding."""
@@ -32,4 +34,5 @@ class CompilerMetadata:
             "generated_from_hash": self.generated_from_hash,
             "generated_python_path": self.generated_python_path,
             "generated_circom_path": self.generated_circom_path,
+            "generated_debug_trace_path": self.generated_debug_trace_path,
         }

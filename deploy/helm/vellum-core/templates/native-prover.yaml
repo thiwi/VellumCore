@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vellum-core.fullname" . }}-native-prover
+spec:
+  replicas: {{ .Values.replicaCount.nativeProver }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "vellum-core.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: native-prover
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "vellum-core.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: native-prover
+    spec:
+      serviceAccountName: {{ include "vellum-core.serviceAccountName" . }}
+      securityContext:
+{{ toYaml .Values.podSecurityContext | indent 8 }}
+      containers:
+      - name: native-prover
+        image: "{{ .Values.images.nativeProver.repository }}:{{ .Values.images.nativeProver.tag }}"
+        imagePullPolicy: {{ .Values.images.nativeProver.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.service.nativeProver.port }}
+          name: grpc
+        env:
+        - name: NATIVE_PROVER_ADDR
+          value: {{ printf "0.0.0.0:%v" .Values.service.nativeProver.port | quote }}
+        - name: SNARKJS_BIN
+          value: snarkjs
+        securityContext:
+{{ toYaml .Values.securityContext | indent 10 }}
+        resources:
+{{ toYaml .Values.resources.nativeProver | indent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vellum-core.fullname" . }}-native-prover
+spec:
+  type: {{ .Values.service.nativeProver.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "vellum-core.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: native-prover
+  ports:
+  - name: grpc
+    port: {{ .Values.service.nativeProver.port }}
+    targetPort: grpc

@@ -51,6 +51,11 @@
         "title": "Exported At",
         "type": "string"
       },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
       "policy": {
         "$ref": "#/$defs/PolicyDescriptorV6"
       },
@@ -209,6 +214,19 @@
         "minLength": 1,
         "title": "Policy Id",
         "type": "string"
+      },
+      "policy_params_ref": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Policy Params Ref"
       }
     },
     "required": [
@@ -324,6 +342,30 @@
       "policy_id": {
         "title": "Policy Id",
         "type": "string"
+      },
+      "policy_params_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Policy Params Hash"
+      },
+      "policy_params_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Policy Params Ref"
       },
       "run_id": {
         "title": "Run Id",

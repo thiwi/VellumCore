@@ -22,6 +22,7 @@ from vellum_core.logic.private_input_schema import validate_private_input_schema
 from vellum_core.metrics import prometheus_payload
 from vellum_core.observability import configure_logging, init_telemetry
 from vellum_core.policies.dual_track import prepare_reference_track
+from vellum_core.policy_parameters import PolicyParameterStore, compute_policy_params_hash
 from vellum_core.policy_registry import PolicyManifestError, PolicyNotFoundError
 from vellum_core.proof_store import VellumAuditStore
 from vellum_core.registry import CircuitNotFoundError
@@ -89,6 +90,7 @@ audit_store = VellumAuditStore(
     vault=vault_client,
     audit_key_name=settings.vault_audit_key,
 )
+policy_parameter_store = PolicyParameterStore(policy_packs_dir=settings.policy_packs_dir)
 
 app = FastAPI(title="Vellum Prover Service", version=PACKAGE_VERSION)
 register_exception_handlers(app)
@@ -252,6 +254,8 @@ def _policy_run_metadata(
     policy_version: str,
     attestation_id: str,
     evidence_ref: str | None,
+    policy_params_ref: str | None,
+    policy_params_hash: str | None,
 ) -> dict[str, Any]:
     """Build normalized metadata persisted for policy-run lifecycle tracking."""
     return {
@@ -264,6 +268,8 @@ def _policy_run_metadata(
         "policy_version": policy_version,
         "attestation_id": attestation_id,
         "evidence_ref": evidence_ref,
+        "policy_params_ref": policy_params_ref,
+        "policy_params_hash": policy_params_hash,
         "decision": None,
         "context": payload.context,
     }
@@ -658,12 +664,28 @@ async def create_policy_run(
         run_id=run_id,
         payload=payload,
     )
+    try:
+        policy_parameters = policy_parameter_store.resolve(
+            policy_id=payload.policy_id,
+            policy_params_ref=payload.policy_params_ref,
+        )
+    except FrameworkError as exc:
+        raise APIError(
+            status_code=422,
+            code=exc.code,
+            message=exc.message,
+            details=exc.details,
+        ) from exc
+    effective_evidence_payload = dict(evidence_payload)
+    if policy_parameters:
+        effective_evidence_payload["policy_parameters"] = policy_parameters
+    policy_params_hash = compute_policy_params_hash(policy_parameters) if policy_parameters else None
 
     try:
         reference_result = prepare_reference_track(
             reference_policy=policy_manifest.reference_policy,
             differential_outputs=policy_manifest.differential_outputs,
-            evidence_payload=evidence_payload,
+            evidence_payload=effective_evidence_payload,
         )
     except FrameworkError as exc:
         raise APIError(
@@ -680,6 +702,8 @@ async def create_policy_run(
         policy_version=policy_manifest.policy_version,
         attestation_id=attestation_id,
         evidence_ref=evidence_ref,
+        policy_params_ref=payload.policy_params_ref,
+        policy_params_hash=policy_params_hash,
     )
 
     request_payload = payload.model_dump()
@@ -696,6 +720,7 @@ async def create_policy_run(
             "decision": reference_result.decision,
             "outputs": reference_result.outputs,
         },
+        policy_parameters=policy_parameters or None,
     )
 
     await _persist_and_enqueue_job(
@@ -748,10 +773,11 @@ async def get_policy_run_status(
 
     error = None
     if isinstance(job.error, str) and job.error:
+        details = metadata.get("error_details")
         error = RunErrorV6(
             code=str(failure_reason or "run_failed"),
             message=job.error,
-            details={},
+            details=details if isinstance(details, dict) else {},
         )
 
     return RunStatusResponseV6(
@@ -764,6 +790,16 @@ async def get_policy_run_status(
         evidence_ref=str(metadata.get("evidence_ref")) if metadata.get("evidence_ref") else None,
         client_request_id=str(request_id) if isinstance(request_id, str) and request_id else None,
         context=context if isinstance(context, dict) else {},
+        policy_params_ref=(
+            str(metadata.get("policy_params_ref"))
+            if isinstance(metadata.get("policy_params_ref"), str)
+            else None
+        ),
+        policy_params_hash=(
+            str(metadata.get("policy_params_hash"))
+            if isinstance(metadata.get("policy_params_hash"), str)
+            else None
+        ),
         error=error,
         submitted_at=job.created_at,
         updated_at=job.updated_at,

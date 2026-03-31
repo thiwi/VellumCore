@@ -52,6 +52,7 @@ def _write_spec(path: Path) -> None:
                 '  pass_signal_value: "1"',
                 "generated_python_path: generated/lending_risk.py",
                 "generated_circom_path: generated/lending_risk.circom",
+                "generated_debug_trace_path: generated/lending_risk.debug.json",
                 "circuit_id: batch_credit_check",
             ]
         ),
@@ -70,6 +71,7 @@ def _write_manifest(path: Path, *, generated_from_hash: str = "stale") -> None:
                     "generated_from_hash": generated_from_hash,
                     "generated_python_path": "generated/lending_risk.py",
                     "generated_circom_path": "generated/lending_risk.circom",
+                    "generated_debug_trace_path": "generated/lending_risk.debug.json",
                 },
             }
         ),
@@ -144,6 +146,7 @@ def test_cli_generate_updates_manifest_metadata(
     assert compiler_metadata["generated_from_hash"] == metadata["generated_from_hash"]
     assert compiler_metadata["generated_python_path"] == "generated/lending_risk.py"
     assert compiler_metadata["generated_circom_path"] == "generated/lending_risk.circom"
+    assert compiler_metadata["generated_debug_trace_path"] == "generated/lending_risk.debug.json"
 
 
 @pytest.mark.unit

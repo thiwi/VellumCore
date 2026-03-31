@@ -14,6 +14,11 @@ class FrameworkError(Exception):
     message: str
     details: dict[str, Any] = field(default_factory=dict)
 
+    def __str__(self) -> str:
+        if not self.details:
+            return f"{self.code}: {self.message}"
+        return f"{self.code}: {self.message} ({self.details})"
+
 
 def framework_error(
     code: str,

@@ -38,5 +38,6 @@ class RunCreateRequestV6(BaseModel):
 
     policy_id: str = Field(min_length=1)
     evidence: EvidenceInputV6
+    policy_params_ref: str | None = Field(default=None, min_length=1)
     context: dict[str, Any] = Field(default_factory=dict)
     client_request_id: str | None = None

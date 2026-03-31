@@ -14,6 +14,7 @@ import json
 
 from vellum_core.policy_compiler.artifacts import CompilerArtifacts, CompilerMetadata
 from vellum_core.policy_compiler.circom_renderer import render_circom_source
+from vellum_core.policy_compiler.debug_renderer import render_debug_trace
 from vellum_core.policy_compiler.drift import check_drift, write_generated_artifacts
 from vellum_core.policy_compiler.manifest import (
     build_compiler_metadata,
@@ -32,10 +33,12 @@ def generate_policy_artifacts(spec: PolicyDSLSpec) -> CompilerArtifacts:
     spec_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     python_source = render_python_source(spec, spec_hash=spec_hash)
     circom_source = render_circom_source(spec, spec_hash=spec_hash)
+    debug_trace_source = render_debug_trace(spec, spec_hash=spec_hash)
     return CompilerArtifacts(
         spec_hash=spec_hash,
         python_source=python_source,
         circom_source=circom_source,
+        debug_trace_source=debug_trace_source,
     )
 
 

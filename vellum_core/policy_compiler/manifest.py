@@ -18,6 +18,7 @@ def build_compiler_metadata(*, spec: PolicyDSLSpec, artifacts: CompilerArtifacts
         generated_from_hash=artifacts.spec_hash,
         generated_python_path=spec.generated_python_path,
         generated_circom_path=spec.generated_circom_path,
+        generated_debug_trace_path=str(spec.generated_debug_trace_path),
     )
 
 

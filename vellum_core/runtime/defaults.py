@@ -16,6 +16,7 @@ from vellum_core.api import (
     ProofEngine,
 )
 from vellum_core.config import Settings
+from vellum_core.policy_parameters import PolicyParameterStore
 from vellum_core.policy_registry import PolicyRegistry
 from vellum_core.providers import (
     GrpcProofProvider,
@@ -132,6 +133,7 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
     circuit_manager = CircuitManager(registry=registry, artifact_store=artifact_store)
     proof_engine = ProofEngine(provider=provider, circuit_manager=circuit_manager)
     policy_registry = PolicyRegistry(settings.policy_packs_dir)
+    policy_parameter_store = PolicyParameterStore(policy_packs_dir=settings.policy_packs_dir)
     evidence_store = FilesystemEvidenceStore(settings.proof_output_dir / "evidence")
     vault_client = VaultTransitClient(
         addr=settings.vault_addr,
@@ -150,6 +152,7 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
     policy_engine = PolicyEngine(
         proof_engine=proof_engine,
         policy_registry=policy_registry,
+        policy_parameter_store=policy_parameter_store,
         evidence_store=evidence_store,
         attestation_service=attestation_service,
     )
@@ -167,6 +170,7 @@ def build_framework_client(settings: Settings) -> FrameworkClient:
         evidence_store=evidence_store,
         attestation_signer=attestation_signer,
         job_backend=CeleryJobBackend(),
+        policy_parameter_store=policy_parameter_store,
     )
 
 

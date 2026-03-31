@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     metadata = build_compiler_metadata(spec=spec, artifacts=artifacts)
 
     if args.command == "generate":
-        python_path, circom_path = write_generated_artifacts(
+        python_path, circom_path, debug_trace_path = write_generated_artifacts(
             repo_root=repo_root,
             spec=spec,
             artifacts=artifacts,
@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
                         **metadata.as_dict(),
                         "generated_python_path": str(python_path.relative_to(repo_root)),
                         "generated_circom_path": str(circom_path.relative_to(repo_root)),
+                        "generated_debug_trace_path": str(debug_trace_path.relative_to(repo_root)),
                         "manifest_updated": manifest_updated,
                     },
                     sort_keys=True,
@@ -83,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"generated:{python_path}")
             print(f"generated:{circom_path}")
+            print(f"generated:{debug_trace_path}")
             if manifest_updated:
                 print(f"manifest_updated:{manifest_path}")
         return 0

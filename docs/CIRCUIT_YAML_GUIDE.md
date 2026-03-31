@@ -64,6 +64,7 @@ expected_attestation:
 
 generated_python_path: vellum_core/policies/generated/lending_risk_reference_v1.py
 generated_circom_path: policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.circom
+generated_debug_trace_path: policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.debug.json
 circuit_id: batch_credit_check
 ```
 
@@ -82,6 +83,7 @@ circuit_id: batch_credit_check
 - `expected_attestation`: hints for pass/fail extraction from public signals.
 - `generated_python_path`: output path for generated Python reference code.
 - `generated_circom_path`: output path for generated Circom.
+- `generated_debug_trace_path`: output path for generated explainability/debug metadata JSON.
 - `circuit_id`: target circuit ID used by the policy.
 
 Optional:
@@ -108,7 +110,21 @@ Supported value sources:
 - `ref: balances`
 - `ref: limits`
 - `ref: active_count`
+- `param: <policy_parameter_name>`
 - `const_int: <integer>`
+
+## 3.4 Policy Parameters
+
+You can declare policy parameters with typed bounds/defaults and reference them via `param`:
+
+```yaml
+policy_parameters:
+  min_balance:
+    value_type: int
+    minimum: 0
+    maximum: 1000000
+    default: 100
+```
 
 ### 3.1 `comparison`
 
@@ -183,6 +199,7 @@ Current supported `expr` values are:
 
 - `decision`
 - `active_count`
+- `policy_params_hash`
 
 Example:
 
@@ -227,4 +244,3 @@ vellum-compiler check-drift policy_packs/<policy_id>/policy_spec.yaml --repo-roo
 - Using unsupported output expression (anything other than `decision` / `active_count`).
 - Unknown primitive IDs.
 - Paths in `generated_python_path` / `generated_circom_path` not matching repository layout.
-

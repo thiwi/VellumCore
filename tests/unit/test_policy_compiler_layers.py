@@ -122,6 +122,7 @@ def test_manifest_sync_and_drift_helpers_roundtrip(tmp_path: Path) -> None:
         spec_hash="abc123",
         python_source="print('py')\n",
         circom_source="template T(){}\n",
+        debug_trace_source='{"policy_id":"lending_risk_v1"}\n',
     )
     write_generated_artifacts(repo_root=tmp_path, spec=spec, artifacts=artifacts)
 
@@ -133,6 +134,7 @@ def test_manifest_sync_and_drift_helpers_roundtrip(tmp_path: Path) -> None:
         generated_from_hash=artifacts.spec_hash,
         generated_python_path=spec.generated_python_path,
         generated_circom_path=spec.generated_circom_path,
+        generated_debug_trace_path=str(spec.generated_debug_trace_path),
     )
     assert sync_manifest_compiler_metadata(manifest_path=manifest_path, metadata=metadata) is True
     assert sync_manifest_compiler_metadata(manifest_path=manifest_path, metadata=metadata) is False

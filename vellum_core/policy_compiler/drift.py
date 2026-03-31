@@ -14,15 +14,18 @@ def write_generated_artifacts(
     repo_root: Path,
     spec: PolicyDSLSpec,
     artifacts: CompilerArtifacts,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path]:
     """Write generated artifacts to deterministic repo-relative target paths."""
     python_path = repo_root / spec.generated_python_path
     circom_path = repo_root / spec.generated_circom_path
+    debug_trace_path = repo_root / str(spec.generated_debug_trace_path)
     python_path.parent.mkdir(parents=True, exist_ok=True)
     circom_path.parent.mkdir(parents=True, exist_ok=True)
+    debug_trace_path.parent.mkdir(parents=True, exist_ok=True)
     python_path.write_text(artifacts.python_source, encoding="utf-8")
     circom_path.write_text(artifacts.circom_source, encoding="utf-8")
-    return python_path, circom_path
+    debug_trace_path.write_text(artifacts.debug_trace_source, encoding="utf-8")
+    return python_path, circom_path, debug_trace_path
 
 
 def check_drift(
@@ -35,14 +38,17 @@ def check_drift(
     """Return True when generated artifacts are identical to committed files."""
     python_path = repo_root / spec.generated_python_path
     circom_path = repo_root / spec.generated_circom_path
-    if not python_path.exists() or not circom_path.exists():
+    debug_trace_path = repo_root / str(spec.generated_debug_trace_path)
+    if not python_path.exists() or not circom_path.exists() or not debug_trace_path.exists():
         return False
 
     committed_python = python_path.read_text(encoding="utf-8")
     committed_circom = circom_path.read_text(encoding="utf-8")
+    committed_debug_trace = debug_trace_path.read_text(encoding="utf-8")
     artifacts_match = (
         committed_python == artifacts.python_source
         and committed_circom == artifacts.circom_source
+        and committed_debug_trace == artifacts.debug_trace_source
     )
     if not artifacts_match:
         return False

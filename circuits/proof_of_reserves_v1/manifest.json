@@ -1,0 +1,14 @@
+{
+  "circuit_id": "proof_of_reserves_v1",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "liabilities": { "type": "integer", "minimum": 0, "maximum": 1000000000000 },
+      "assets": { "type": "integer", "minimum": 0, "maximum": 1000000000000 }
+    },
+    "required": ["liabilities", "assets"],
+    "additionalProperties": false
+  },
+  "public_signals": ["solvency_ok"],
+  "version": "1.0.0"
+}

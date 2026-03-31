@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vellum-core.fullname" . }}-maintenance
+spec:
+  replicas: {{ .Values.replicaCount.maintenance }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "vellum-core.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: maintenance
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "vellum-core.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: maintenance
+    spec:
+      serviceAccountName: {{ include "vellum-core.serviceAccountName" . }}
+      securityContext:
+{{ toYaml .Values.podSecurityContext | indent 8 }}
+      containers:
+      - name: maintenance
+        image: "{{ .Values.images.maintenance.repository }}:{{ .Values.images.maintenance.tag }}"
+        imagePullPolicy: {{ .Values.images.maintenance.pullPolicy }}
+        command: ["python", "maintenance_worker.py"]
+        env:
+{{ include "vellum-core.commonEnv" . | indent 10 }}
+        - name: APP_NAME
+          value: {{ printf "%s-maintenance" .Values.env.appNamePrefix | quote }}
+        securityContext:
+{{ toYaml .Values.securityContext | indent 10 }}
+        resources:
+{{ toYaml .Values.resources.maintenance | indent 10 }}

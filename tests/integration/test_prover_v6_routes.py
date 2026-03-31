@@ -137,6 +137,75 @@ def test_v6_run_submit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.integration
+def test_v6_run_submit_resolves_policy_params_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    prover_service = _load_prover_service(monkeypatch)
+    _patch_auth(monkeypatch, prover_service, required_scope="proofs:write")
+
+    calls: dict[str, Any] = {}
+
+    async def fake_evidence_put(*, run_id: str, payload: dict[str, Any]) -> str:
+        _ = payload
+        return f"memory://{run_id}"
+
+    async def fake_create_proof_job(**kwargs: Any) -> Any:
+        calls["create_proof_job"] = kwargs
+        return SimpleNamespace(proof_id=kwargs["proof_id"])
+
+    async def fake_append_event(**kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        return {"id": 1}
+
+    async def fake_enqueue(*, task_name: str, args: list[Any], queue: str) -> None:
+        _ = (task_name, args, queue)
+
+    async def fake_seal_job_payload(**kwargs: Any) -> str:
+        calls["seal_job_payload"] = kwargs
+        return "sealed-payload"
+
+    monkeypatch.setattr(
+        prover_service.framework.policy_registry,
+        "get_manifest",
+        lambda _policy_id: SimpleNamespace(
+            circuit_id="batch_credit_check",
+            policy_version="1.0.0",
+            reference_policy="lending_risk_reference_v1",
+            primitives=["SafeSub"],
+            differential_outputs={
+                "all_valid": SimpleNamespace(signal_index=0, value_type="bool"),
+                "active_count_out": SimpleNamespace(signal_index=1, value_type="int"),
+            },
+            expected_attestation={"decision_signal_index": 0, "pass_signal_value": "1"},
+        ),
+    )
+    monkeypatch.setattr(
+        prover_service.policy_parameter_store,
+        "resolve",
+        lambda *, policy_id, policy_params_ref: {"min_balance": 150},
+    )
+    monkeypatch.setattr(prover_service.framework.evidence_store, "put", fake_evidence_put)
+    monkeypatch.setattr(prover_service, "seal_job_payload", fake_seal_job_payload)
+    monkeypatch.setattr(prover_service.db, "create_proof_job", fake_create_proof_job, raising=False)
+    monkeypatch.setattr(prover_service.audit_store, "append_event", fake_append_event, raising=False)
+    monkeypatch.setattr(prover_service.framework.job_backend, "enqueue", fake_enqueue)
+
+    client = TestClient(prover_service.app)
+    response = client.post(
+        "/v6/runs",
+        json={
+            "policy_id": "lending_risk_v1",
+            "policy_params_ref": "bank_profile_q2",
+            "evidence": {"type": "inline", "payload": {"balances": [120], "limits": [100]}},
+        },
+        headers={"Authorization": "Bearer demo"},
+    )
+
+    assert response.status_code == 202
+    assert calls["create_proof_job"]["metadata"]["policy_params_ref"] == "bank_profile_q2"
+    assert calls["create_proof_job"]["metadata"]["policy_params_hash"]
+    assert calls["seal_job_payload"]["policy_parameters"] == {"min_balance": 150}
+
+
+@pytest.mark.integration
 def test_v6_proof_list(monkeypatch: pytest.MonkeyPatch) -> None:
     prover_service = _load_prover_service(monkeypatch)
     _patch_auth(monkeypatch, prover_service, required_scope="proofs:read")
@@ -384,3 +453,48 @@ def test_v6_ops_dlq_requeue(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["source_proof_id"] == "proof-1"
     assert calls["enqueue"]["task_name"] == "worker.process_proof_job"
     assert calls["mark_requeued"]["dlq_id"] == 1
+
+
+@pytest.mark.integration
+def test_v6_run_status_includes_error_details_and_policy_param_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prover_service = _load_prover_service(monkeypatch)
+    _patch_auth(monkeypatch, prover_service, required_scope="proofs:read")
+
+    async def fake_get_proof_job(_run_id: str) -> Any:
+        return SimpleNamespace(
+            proof_id="run-1",
+            status="failed",
+            circuit_id="batch_credit_check",
+            error="proof generation failed",
+            created_at="2026-03-31T08:00:00Z",
+            updated_at="2026-03-31T08:00:10Z",
+            meta={
+                "policy_id": "lending_risk_v1",
+                "decision": None,
+                "attestation_id": "att-run-1",
+                "failure_reason": "runtime_exception",
+                "context": {"tenant": "acme"},
+                "policy_params_ref": "bank_profile_q2",
+                "policy_params_hash": "abc123",
+                "error_details": {
+                    "explainability": {
+                        "version": "v1",
+                        "reason": "policy_rule_failed",
+                        "rule_id": "rule_cmp_0",
+                    }
+                },
+            },
+        )
+
+    monkeypatch.setattr(prover_service.db, "get_proof_job", fake_get_proof_job, raising=False)
+
+    client = TestClient(prover_service.app)
+    response = client.get("/v6/runs/run-1", headers={"Authorization": "Bearer demo"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["policy_params_ref"] == "bank_profile_q2"
+    assert body["policy_params_hash"] == "abc123"
+    assert body["error"]["details"]["explainability"]["rule_id"] == "rule_cmp_0"

@@ -100,13 +100,14 @@ def test_generate_and_check_drift_roundtrip(tmp_path: Path) -> None:
     assert "template GeneratedLendingRisk" in artifacts.circom_source
 
     assert check_drift(repo_root=tmp_path, spec=spec, artifacts=artifacts) is False
-    python_path, circom_path = write_generated_artifacts(
+    python_path, circom_path, debug_trace_path = write_generated_artifacts(
         repo_root=tmp_path,
         spec=spec,
         artifacts=artifacts,
     )
     assert python_path.exists()
     assert circom_path.exists()
+    assert debug_trace_path.exists()
     assert check_drift(repo_root=tmp_path, spec=spec, artifacts=artifacts) is True
 
     python_path.write_text("drifted", encoding="utf-8")
@@ -264,6 +265,56 @@ def test_negative_constant_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(FrameworkError) as exc:
         generate_policy_artifacts(spec)
     assert exc.value.code == "policy_spec_unsupported"
+
+
+@pytest.mark.unit
+def test_policy_parameters_generate_hash_and_public_inputs(tmp_path: Path) -> None:
+    spec_path = tmp_path / "policy_spec.yaml"
+    _write_lending_spec(
+        spec_path,
+        decision_inner_lines=[
+            "    kind: comparison",
+            "    comparison:",
+            '      op: ">"',
+            "      left:",
+            "        ref: balances",
+            "      right:",
+            "        param: min_balance",
+        ],
+    )
+    spec_path.write_text(
+        spec_path.read_text(encoding="utf-8")
+        + "\n"
+        + "\n".join(
+            [
+                "policy_parameters:",
+                "  min_balance:",
+                "    value_type: int",
+                "    minimum: 0",
+                "    maximum: 1000000",
+                "    default: 100",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    payload = spec_path.read_text(encoding="utf-8")
+    payload = payload.replace(
+        "outputs:\n  all_valid:\n    expr: decision\n    value_type: bool\n    signal_index: 0\n  active_count_out:\n    expr: active_count\n    value_type: int\n    signal_index: 1\n",
+        "outputs:\n  all_valid:\n    expr: decision\n    value_type: bool\n    signal_index: 0\n  active_count_out:\n    expr: active_count\n    value_type: int\n    signal_index: 1\n  policy_params_hash:\n    expr: policy_params_hash\n    value_type: string\n    signal_index: 2\n",
+    )
+    spec_path.write_text(payload, encoding="utf-8")
+
+    spec = load_policy_spec(spec_path)
+    artifacts = generate_policy_artifacts(spec)
+
+    assert "POLICY_PARAMETER_ORDER" in artifacts.python_source
+    assert '"policy_params"' in artifacts.python_source
+    assert "compute_policy_params_hash" in artifacts.python_source
+    assert "signal input policy_params[1];" in artifacts.circom_source
+    assert "signal input expected_policy_params_hash;" in artifacts.circom_source
+    assert "component policy_params_hasher = Poseidon(1);" in artifacts.circom_source
+    assert "policy_params_hash <== computed_policy_params_hash;" in artifacts.circom_source
 
 
 @pytest.mark.unit

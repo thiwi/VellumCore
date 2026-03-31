@@ -1,0 +1,31 @@
+{
+  "policy_id": "proof_of_reserves_v1",
+  "policy_version": "1.0.0",
+  "circuit_id": "proof_of_reserves_v1",
+  "description": "Proof of reserves/solvency policy proving liabilities <= assets.",
+  "input_contract": {
+    "mode": "private_input_or_inline",
+    "required_fields": ["liabilities", "assets"]
+  },
+  "evidence_contract": {
+    "type": "json",
+    "schema_hint": "Provide liabilities/assets as integers or private_input payload."
+  },
+  "reference_policy": "proof_of_reserves_reference_v1",
+  "primitives": [
+    "SafeSub",
+    "MerkleProof",
+    "ActiveCountBounds"
+  ],
+  "differential_outputs": {
+    "solvency_ok": {
+      "signal_index": 0,
+      "value_type": "bool"
+    }
+  },
+  "compiler_metadata": {},
+  "expected_attestation": {
+    "decision_signal_index": 0,
+    "pass_signal_value": "1"
+  }
+}

@@ -49,7 +49,10 @@ def test_value_ref_requires_exactly_one_of_ref_or_const_int() -> None:
         ValueRef()
     with pytest.raises(ValidationError):
         ValueRef(ref="balances", const_int=1)
+    with pytest.raises(ValidationError):
+        ValueRef(ref="balances", param="threshold")
     assert ValueRef(ref="active_count").ref == "active_count"
+    assert ValueRef(param="threshold").param == "threshold"
     assert ValueRef(const_int=42).const_int == 42
 
 

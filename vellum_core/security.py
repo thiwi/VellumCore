@@ -24,6 +24,7 @@ def compute_input_fingerprint(*, source_mode: str, payload: dict[str, Any]) -> s
         evidence = payload.get("evidence")
         material = {
             "policy_id": payload.get("policy_id"),
+            "policy_params_ref": payload.get("policy_params_ref"),
             "evidence": evidence,
         }
     else:
@@ -50,6 +51,7 @@ def build_input_summary(*, source_mode: str, payload: dict[str, Any], circuit_id
             summary["private_input_keys"] = sorted(str(k) for k in private_input.keys())[:25]
     if source_mode == "policy_run":
         summary["policy_id"] = payload.get("policy_id")
+        summary["policy_params_ref"] = payload.get("policy_params_ref")
         evidence = payload.get("evidence")
         if isinstance(evidence, dict):
             summary["evidence_type"] = evidence.get("type")
@@ -67,6 +69,7 @@ async def seal_job_payload(
     request_payload: dict[str, Any],
     private_input: dict[str, Any] | None,
     dual_track_reference: dict[str, Any] | None = None,
+    policy_parameters: dict[str, int] | None = None,
 ) -> str:
     """Encrypt sensitive request payload material for DB persistence."""
     plaintext = canonical_json_bytes(
@@ -74,6 +77,7 @@ async def seal_job_payload(
             "request_payload": request_payload,
             "private_input": private_input,
             "dual_track_reference": dual_track_reference,
+            "policy_parameters": policy_parameters,
         }
     )
     return await vault_client.encrypt(key_name, plaintext)

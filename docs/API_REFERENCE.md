@@ -59,6 +59,7 @@ Request (inline evidence):
 ```json
 {
   "policy_id": "lending_risk_v1",
+  "policy_params_ref": "bank_profile_q2",
   "evidence": {
     "type": "inline",
     "payload": {
@@ -109,6 +110,8 @@ Response:
   "decision": "pass",
   "attestation_id": "att-uuid",
   "evidence_ref": "memory://run-123-evidence",
+  "policy_params_ref": "bank_profile_q2",
+  "policy_params_hash": "sha256...",
   "client_request_id": "run-2026-03-30-001",
   "context": {
     "tenant": "acme-bank"
@@ -150,7 +153,11 @@ Response:
       "entry_hash": "...",
       "signature": "vault:v1:..."
     }
-  ]
+  ],
+  "metadata": {
+    "policy_params_ref": "bank_profile_q2",
+    "policy_params_hash": "sha256..."
+  }
 }
 ```
 
@@ -170,6 +177,10 @@ Common domain errors:
 - `attestation_not_ready`
 - `payload_too_large` (HTTP 413)
 - `invalid_private_input_schema` (HTTP 422)
+
+Failed run status responses may include structured explainability under:
+
+- `error.details.explainability` (rule mapping + provider hint when available)
 
 ## Metrics
 

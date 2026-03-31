@@ -31,6 +31,7 @@ framework = FrameworkClient.from_env()
 result = await framework.policy_engine.run(
     PolicyRunRequest(
         policy_id="lending_risk_v1",
+        policy_params_ref="bank_profile_q2",
         evidence={"type": "inline", "payload": {"balances": [120], "limits": [100]}},
     )
 )

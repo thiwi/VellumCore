@@ -8,6 +8,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_ready
@@ -18,6 +19,7 @@ from vellum_core.celery_app import celery_app
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.logic.batcher import batch_prepare_from_private_input
+from vellum_core.logic.explainability import build_explainability
 from vellum_core.logic.failure_triage import classify_failure
 from vellum_core.logic.job_attempts import next_attempt_metadata
 from vellum_core.logic.private_input_schema import validate_private_input_schema
@@ -96,6 +98,7 @@ async def _record_dead_letter_job(
     error_message: str,
     attempt_metadata: dict[str, int],
     sealed_rerun_payload: str | None,
+    explainability: dict[str, Any] | None = None,
 ) -> None:
     triage = classify_failure(
         failure_reason=failure_reason,
@@ -110,7 +113,10 @@ async def _record_dead_letter_job(
         error_message=error_message,
         attempt_count=int(attempt_metadata.get("attempt_count", 0)),
         max_attempts=int(attempt_metadata.get("max_attempts", 0)),
-        triage_details={"detail": triage.detail},
+        triage_details={
+            "detail": triage.detail,
+            "explainability": explainability or {},
+        },
         job_metadata=dict((job.meta or {})),
         sealed_rerun_payload=sealed_rerun_payload,
     )
@@ -157,7 +163,16 @@ async def _process_proof_job_async(proof_id: str) -> None:
             proof_id=proof_id,
             status="failed",
             error=failure_reason,
-            metadata_patch={**attempt_metadata, "failure_reason": "max_attempts_exceeded"},
+            metadata_patch={
+                **attempt_metadata,
+                "failure_reason": "max_attempts_exceeded",
+                "error_details": {
+                    "explainability": {
+                        "version": "v1",
+                        "reason": "max_attempts_exceeded",
+                    }
+                },
+            },
         )
         failed_metadata = dict((failed_job.meta if failed_job is not None else job.meta) or {})
         failed_metadata.update(
@@ -181,6 +196,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
             error_message=failure_reason,
             attempt_metadata=attempt_metadata,
             sealed_rerun_payload=sealed_rerun_payload,
+            explainability={"version": "v1", "reason": "max_attempts_exceeded"},
         )
         await db.purge_sealed_job_payload(proof_id=proof_id)
         logger.error(
@@ -209,6 +225,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
     )
 
     started = time.perf_counter()
+    decrypted: dict[str, Any] | None = None
     try:
         if job.sealed_job_payload is None:
             raise ValueError("Missing sealed_job_payload for proof job")
@@ -349,12 +366,18 @@ async def _process_proof_job_async(proof_id: str) -> None:
             "proof job exceeded celery soft time limit "
             f"({settings.celery_task_soft_time_limit_seconds}s)"
         )
+        explainability = _build_failure_explainability(
+            job=job,
+            decrypted_payload=decrypted,
+            error_message=timeout_error,
+        )
         failed_job = await db.update_proof_job(
             proof_id=proof_id,
             status="failed",
             error=timeout_error,
             metadata_patch={
                 "failure_reason": "soft_time_limit_exceeded",
+                "error_details": {"explainability": explainability},
                 **attempt_metadata,
             },
         )
@@ -381,6 +404,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
             error_message=timeout_error,
             attempt_metadata=attempt_metadata,
             sealed_rerun_payload=sealed_rerun_payload,
+            explainability=explainability,
         )
         logger.exception(
             "proof_job_soft_time_limit_exceeded",
@@ -393,12 +417,18 @@ async def _process_proof_job_async(proof_id: str) -> None:
         raise
     except Exception as exc:
         sealed_rerun_payload = job.sealed_job_payload
+        explainability = _build_failure_explainability(
+            job=job,
+            decrypted_payload=decrypted,
+            error_message=str(exc),
+        )
         failed_job = await db.update_proof_job(
             proof_id=proof_id,
             status="failed",
             error=str(exc),
             metadata_patch={
                 "failure_reason": "runtime_exception",
+                "error_details": {"explainability": explainability},
                 **attempt_metadata,
             },
         )
@@ -425,6 +455,7 @@ async def _process_proof_job_async(proof_id: str) -> None:
             error_message=str(exc),
             attempt_metadata=attempt_metadata,
             sealed_rerun_payload=sealed_rerun_payload,
+            explainability=explainability,
         )
         logger.exception(
             "proof_job_failed",
@@ -437,3 +468,40 @@ async def _process_proof_job_async(proof_id: str) -> None:
         raise
     finally:
         observe_proof_duration(time.perf_counter() - started)
+
+
+def _build_failure_explainability(
+    *,
+    job: object,
+    decrypted_payload: dict[str, Any] | None,
+    error_message: str,
+) -> dict[str, Any]:
+    metadata = dict(getattr(job, "meta", {}) or {})
+    policy_id = metadata.get("policy_id")
+    private_input: dict[str, Any] | None = None
+    policy_parameters: dict[str, int] = {}
+    if isinstance(decrypted_payload, dict):
+        private_input_raw = decrypted_payload.get("private_input")
+        if isinstance(private_input_raw, dict):
+            private_input = private_input_raw
+        policy_params_raw = decrypted_payload.get("policy_parameters")
+        if isinstance(policy_params_raw, dict):
+            policy_parameters = {
+                str(key): int(value)
+                for key, value in policy_params_raw.items()
+                if isinstance(value, int) and not isinstance(value, bool)
+            }
+
+    if not isinstance(policy_id, str) or policy_id == "":
+        return {"version": "v1", "reason": "policy_trace_unavailable"}
+
+    try:
+        return build_explainability(
+            policy_id=policy_id,
+            policy_packs_dir=settings.policy_packs_dir,
+            private_input=private_input,
+            policy_parameters=policy_parameters,
+            error_message=error_message,
+        )
+    except Exception:
+        return {"version": "v1", "reason": "policy_trace_unavailable"}

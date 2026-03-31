@@ -36,6 +36,14 @@ Use `vellum-compiler` to:
 - sync `manifest.json.compiler_metadata` from the generated spec hash,
 - check drift between committed generated files/compiler metadata and compiler output.
 
+### Runtime Policy Parameters
+
+v6 runs can optionally provide `policy_params_ref`. The reference deployment resolves this from:
+
+- `policy_packs/<policy_id>/params/<policy_params_ref>.json`
+
+The resolved integer map is hashed (`policy_params_hash`) and persisted into run/attestation metadata.
+
 Current compiler support for generated decision logic:
 
 - top-level `all` or `any` aggregation over array elements,
@@ -67,6 +75,22 @@ Current compiler support for generated decision logic:
   - `evidence.type=inline` + `evidence.payload.private_input`
   - `evidence.type=inline` + `evidence.payload.balances` + `evidence.payload.limits`
   - `evidence.type=ref` + pre-stored evidence reference
+- decision mapping:
+  - `public_signals[0] == "1"` => `pass`
+  - otherwise => `fail`
+
+`proof_of_reserves_v1`:
+
+- circuit: `proof_of_reserves_v1`
+- reference policy: `proof_of_reserves_reference_v1`
+- decision mapping:
+  - `public_signals[0] == "1"` => `pass`
+  - otherwise => `fail`
+
+`zk_kyc_v1`:
+
+- circuit: `zk_kyc_v1`
+- reference policy: `zk_kyc_reference_v1`
 - decision mapping:
   - `public_signals[0] == "1"` => `pass`
   - otherwise => `fail`

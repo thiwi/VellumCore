@@ -1,0 +1,143 @@
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+images:
+  prover:
+    repository: vellum/prover
+    tag: dev
+    pullPolicy: IfNotPresent
+  verifier:
+    repository: vellum/verifier
+    tag: dev
+    pullPolicy: IfNotPresent
+  worker:
+    repository: vellum/worker
+    tag: dev
+    pullPolicy: IfNotPresent
+  maintenance:
+    repository: vellum/worker
+    tag: dev
+    pullPolicy: IfNotPresent
+  nativeProver:
+    repository: vellum/native-prover
+    tag: dev
+    pullPolicy: IfNotPresent
+
+replicaCount:
+  prover: 1
+  verifier: 1
+  worker: 1
+  maintenance: 1
+  nativeProver: 1
+
+service:
+  prover:
+    port: 8001
+    type: ClusterIP
+  verifier:
+    port: 8002
+    type: ClusterIP
+  nativeProver:
+    port: 50051
+    type: ClusterIP
+
+resources:
+  prover: {}
+  verifier: {}
+  worker: {}
+  maintenance: {}
+  nativeProver: {}
+  frameworkInit: {}
+
+env:
+  appNamePrefix: vellum
+  logLevel: INFO
+  proofProviderMode: grpc
+  grpcProverTimeoutSeconds: "30"
+  proofJobMaxAttempts: "3"
+  maxParallelProofs: "2"
+  jwtIssuer: bank.local
+  jwtAudience: sentinel-zk
+  bankKeyId: bank-key-1
+  bankKeyMappingJson: '{"bank-key-1":"vellum-bank"}'
+  metricsRequireAuth: "true"
+  securityProfile: strict
+  nonceWindowSeconds: "300"
+  jwtMaxTtlSeconds: "900"
+  jwtLeewaySeconds: "30"
+  submitRateLimitPerMinute: "120"
+  maxSubmitBodyBytes: "1048576"
+  celerySoftTimeLimitSeconds: "50"
+  celeryTimeLimitSeconds: "60"
+  celeryWorkerMaxTasksPerChild: "100"
+  vaultPublicKeyCacheTtlSeconds: "300"
+  nativeVerifyBaselineSeconds: "0.000005"
+  jobRuntimeRetentionDays: "7"
+  fileArchiveAfterDays: "30"
+  maintenanceIntervalSeconds: "3600"
+  maintenanceCycleFileScanLimit: "1000"
+
+externalDependencies:
+  postgres:
+    host: postgres.default.svc.cluster.local
+    port: 5432
+    db: vellum
+    user: vellum
+    password: vellum
+  redis:
+    host: redis.default.svc.cluster.local
+    brokerDb: 0
+    nonceDb: 1
+  vault:
+    addr: https://vault.default.svc.cluster.local:8200
+    token: ""
+    jwtKey: vellum-jwt
+    auditKey: vellum-audit
+    bankKey: vellum-bank
+    dataKey: vellum-data
+
+secrets:
+  create: false
+  name: vellum-core-secrets
+  data: {}
+
+frameworkInit:
+  enabled: true
+  setupCircuitIds: batch_credit_check
+  hookDeletePolicy: before-hook-creation,hook-succeeded
+
+keda:
+  enabled: true
+  queueName: vellum-queue
+  minReplicaCount: 1
+  maxReplicaCount: 20
+  listLength: 10
+
+networkPolicy:
+  enabled: true
+
+serviceMonitor:
+  enabled: false
+  labels: {}
+  interval: 30s
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

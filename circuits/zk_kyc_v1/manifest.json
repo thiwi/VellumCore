@@ -1,0 +1,16 @@
+{
+  "circuit_id": "zk_kyc_v1",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "age": { "type": "integer", "minimum": 0, "maximum": 130 },
+      "country_code": { "type": "integer", "minimum": 0, "maximum": 999 },
+      "min_age": { "type": "integer", "minimum": 0, "maximum": 130 },
+      "allowed_country_code": { "type": "integer", "minimum": 0, "maximum": 999 }
+    },
+    "required": ["age", "country_code", "min_age", "allowed_country_code"],
+    "additionalProperties": false
+  },
+  "public_signals": ["kyc_ok", "min_age", "allowed_country_code"],
+  "version": "1.0.0"
+}

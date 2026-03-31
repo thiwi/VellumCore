@@ -5,7 +5,10 @@
   "description": "Batch lending risk control that proves all active balances exceed limits.",
   "input_contract": {
     "mode": "balances_limits_or_private_input",
-    "required_fields": ["balances", "limits"],
+    "required_fields": [
+      "balances",
+      "limits"
+    ],
     "max_batch": 250
   },
   "evidence_contract": {
@@ -34,9 +37,10 @@
   "compiler_metadata": {
     "spec_version": "1.0.0",
     "compiler_version": "0.1.0",
-    "generated_from_hash": "3f2952691f9386b4e095d383fcd5917bc7fa8924cfca3d33978079df45086b6f",
+    "generated_from_hash": "52a4be58db6dccfd381bd33e7508b77ca6cd2a4187ddebf0a55e1bf645f6bf6a",
     "generated_python_path": "vellum_core/policies/generated/lending_risk_reference_v1.py",
-    "generated_circom_path": "policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.circom"
+    "generated_circom_path": "policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.circom",
+    "generated_debug_trace_path": "policy_packs/lending_risk_v1/generated/lending_risk_v1.generated.debug.json"
   },
   "expected_attestation": {
     "decision_signal_index": 0,

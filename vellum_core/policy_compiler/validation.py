@@ -15,7 +15,12 @@ def ensure_supported_decision(spec: PolicyDSLSpec) -> None:
             "Compiler currently supports `all`/`any` as top-level decision",
             policy_id=spec.policy_id,
         )
-    validate_boolean_expr(decision.inner, policy_id=spec.policy_id, indexed_context=True)
+    validate_boolean_expr(
+        decision.inner,
+        policy_id=spec.policy_id,
+        indexed_context=True,
+        parameter_names=set(spec.policy_parameters.keys()),
+    )
 
 
 def validate_boolean_expr(
@@ -23,6 +28,7 @@ def validate_boolean_expr(
     *,
     policy_id: str,
     indexed_context: bool,
+    parameter_names: set[str],
 ) -> None:
     """Validate one boolean expression recursively."""
     if expr.kind == "comparison":
@@ -32,13 +38,28 @@ def validate_boolean_expr(
                 "Comparison node is missing comparison payload",
                 policy_id=policy_id,
             )
-        validate_value(expr.comparison.left, policy_id=policy_id, indexed_context=indexed_context)
-        validate_value(expr.comparison.right, policy_id=policy_id, indexed_context=indexed_context)
+        validate_value(
+            expr.comparison.left,
+            policy_id=policy_id,
+            indexed_context=indexed_context,
+            parameter_names=parameter_names,
+        )
+        validate_value(
+            expr.comparison.right,
+            policy_id=policy_id,
+            indexed_context=indexed_context,
+            parameter_names=parameter_names,
+        )
         return
 
     if expr.kind in {"and", "or"}:
         for arg in expr.args:
-            validate_boolean_expr(arg, policy_id=policy_id, indexed_context=indexed_context)
+            validate_boolean_expr(
+                arg,
+                policy_id=policy_id,
+                indexed_context=indexed_context,
+                parameter_names=parameter_names,
+            )
         return
 
     if expr.kind == "not":
@@ -48,7 +69,12 @@ def validate_boolean_expr(
                 "`not` node must define inner expression",
                 policy_id=policy_id,
             )
-        validate_boolean_expr(expr.inner, policy_id=policy_id, indexed_context=indexed_context)
+        validate_boolean_expr(
+            expr.inner,
+            policy_id=policy_id,
+            indexed_context=indexed_context,
+            parameter_names=parameter_names,
+        )
         return
 
     if expr.kind in {"all", "any"}:
@@ -58,7 +84,12 @@ def validate_boolean_expr(
                 f"`{expr.kind}` node must define inner expression",
                 policy_id=policy_id,
             )
-        validate_boolean_expr(expr.inner, policy_id=policy_id, indexed_context=True)
+        validate_boolean_expr(
+            expr.inner,
+            policy_id=policy_id,
+            indexed_context=True,
+            parameter_names=parameter_names,
+        )
         return
 
     raise framework_error(
@@ -69,7 +100,13 @@ def validate_boolean_expr(
     )
 
 
-def validate_value(value: ValueRef, *, policy_id: str, indexed_context: bool) -> None:
+def validate_value(
+    value: ValueRef,
+    *,
+    policy_id: str,
+    indexed_context: bool,
+    parameter_names: set[str],
+) -> None:
     """Validate one value reference/constant."""
     if value.const_int is not None:
         if value.const_int < 0:
@@ -77,6 +114,16 @@ def validate_value(value: ValueRef, *, policy_id: str, indexed_context: bool) ->
                 "policy_spec_unsupported",
                 "Negative constants are not supported in compiler v1",
                 policy_id=policy_id,
+            )
+        return
+
+    if value.param is not None:
+        if value.param not in parameter_names:
+            raise framework_error(
+                "policy_spec_unsupported",
+                "Unknown policy parameter reference in compiler v1",
+                policy_id=policy_id,
+                param=value.param,
             )
         return
 

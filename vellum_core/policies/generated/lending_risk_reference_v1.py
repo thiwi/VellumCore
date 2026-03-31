@@ -6,6 +6,7 @@ from typing import Any
 
 from vellum_core.api.errors import framework_error
 from vellum_core.logic.batcher import MAX_UINT32, batch_prepare_from_private_input, batch_prepare_input
+
 from vellum_core.policies.base import PolicyDecision
 from vellum_core.policies.normalization import require_integer_list
 
@@ -15,13 +16,17 @@ class GeneratedReferencePolicy:
 
     reference_policy = "lending_risk_reference_v1"
     policy_id = "lending_risk_v1"
-    spec_hash = "3f2952691f9386b4e095d383fcd5917bc7fa8924cfca3d33978079df45086b6f"
+    spec_hash = "52a4be58db6dccfd381bd33e7508b77ca6cd2a4187ddebf0a55e1bf645f6bf6a"
     batch_size = 250
+    POLICY_PARAMETER_ORDER = []
+    POLICY_PARAMETER_SPECS = {}
 
     def validate(self, evidence_payload: dict[str, Any]) -> None:
         _ = self.normalize(evidence_payload)
 
     def normalize(self, evidence_payload: dict[str, Any]) -> dict[str, Any]:
+        policy_params = self._resolve_policy_parameters(evidence_payload.get("policy_parameters"))
+
         private_input = evidence_payload.get("private_input")
         if isinstance(private_input, dict):
             try:
@@ -32,7 +37,9 @@ class GeneratedReferencePolicy:
                     "Evidence payload failed batch validation",
                     reason=str(exc),
                 ) from exc
-            return prepared.to_circuit_input()
+            normalized = prepared.to_circuit_input()
+            normalized["policy_parameters"] = policy_params
+            return normalized
 
         balances = require_integer_list(
             field="balances",
@@ -54,9 +61,12 @@ class GeneratedReferencePolicy:
                 "Evidence payload failed batch validation",
                 reason=str(exc),
             ) from exc
-        return prepared.to_circuit_input()
+        normalized = prepared.to_circuit_input()
+        normalized["policy_parameters"] = policy_params
+        return normalized
 
     def to_private_input(self, normalized_evidence: dict[str, Any]) -> dict[str, Any]:
+
         return {
             "balances": list(normalized_evidence["balances"]),
             "limits": list(normalized_evidence["limits"]),
@@ -67,6 +77,7 @@ class GeneratedReferencePolicy:
         active_count = int(normalized_evidence["active_count"])
         balances = list(normalized_evidence["balances"])
         limits = list(normalized_evidence["limits"])
+
         decision = all(((balances[idx_0] > limits[idx_0])) for idx_0 in range(active_count))
         return "pass" if decision else "fail"
 
@@ -74,8 +85,64 @@ class GeneratedReferencePolicy:
         active_count = int(normalized_evidence["active_count"])
         balances = list(normalized_evidence["balances"])
         limits = list(normalized_evidence["limits"])
+
         all_valid = all(((balances[idx_0] > limits[idx_0])) for idx_0 in range(active_count))
         return {
             "all_valid": all_valid,
             "active_count_out": active_count,
         }
+
+    def _resolve_policy_parameters(self, payload: Any) -> dict[str, int]:
+        if not self.POLICY_PARAMETER_ORDER:
+            return {}
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, dict):
+            raise framework_error(
+                "invalid_evidence_payload",
+                "policy_parameters must be an object",
+            )
+        resolved: dict[str, int] = {}
+        unknown = sorted(set(str(key) for key in payload.keys()) - set(self.POLICY_PARAMETER_ORDER))
+        if unknown:
+            raise framework_error(
+                "invalid_evidence_payload",
+                "policy_parameters contains unknown keys",
+                unknown=unknown,
+            )
+        for name in self.POLICY_PARAMETER_ORDER:
+            spec = self.POLICY_PARAMETER_SPECS[name]
+            value = payload.get(name, spec.get("default"))
+            if value is None:
+                raise framework_error(
+                    "invalid_evidence_payload",
+                    "policy_parameters missing required key",
+                    key=name,
+                )
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise framework_error(
+                    "invalid_evidence_payload",
+                    "policy_parameters values must be integers",
+                    key=name,
+                    value=value,
+                )
+            minimum = spec.get("minimum")
+            maximum = spec.get("maximum")
+            if minimum is not None and value < int(minimum):
+                raise framework_error(
+                    "invalid_evidence_payload",
+                    "policy_parameters value below minimum",
+                    key=name,
+                    minimum=int(minimum),
+                    value=value,
+                )
+            if maximum is not None and value > int(maximum):
+                raise framework_error(
+                    "invalid_evidence_payload",
+                    "policy_parameters value above maximum",
+                    key=name,
+                    maximum=int(maximum),
+                    value=value,
+                )
+            resolved[name] = int(value)
+        return resolved

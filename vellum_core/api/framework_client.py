@@ -10,6 +10,7 @@ from vellum_core.api.proof_engine import ProofEngine
 from vellum_core.api.policy_engine import PolicyEngine
 from vellum_core.api.attestation_service import AttestationService
 from vellum_core.config import Settings
+from vellum_core.policy_parameters import PolicyParameterStore
 from vellum_core.policy_registry import PolicyRegistry
 from vellum_core.spi import (
     ArtifactStore,
@@ -37,6 +38,7 @@ class FrameworkClient:
     evidence_store: EvidenceStore
     attestation_signer: AttestationSigner
     job_backend: JobBackend
+    policy_parameter_store: PolicyParameterStore
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "FrameworkClient":

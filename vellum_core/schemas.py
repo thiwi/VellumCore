@@ -162,6 +162,8 @@ class RunStatusResponseV6(BaseModel):
     decision: Literal["pass", "fail"] | None = None
     attestation_id: str
     evidence_ref: str | None = None
+    policy_params_ref: str | None = None
+    policy_params_hash: str | None = None
     client_request_id: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     error: RunErrorV6 | None = None
@@ -230,6 +232,7 @@ class AttestationResponseV6(BaseModel):
     public_signals_hash: str
     artifact_digests: dict[str, str]
     signature_chain: list[dict[str, Any]]
+    metadata: dict[str, Any] = Field(default_factory=dict)
     exported_at: datetime
 
 

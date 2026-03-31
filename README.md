@@ -53,6 +53,10 @@ Start full stack:
 
 `framework-init` now prepares required circuit artifacts during compose startup.
 
+Kubernetes deployment baseline is available via Helm chart:
+
+- `deploy/helm/vellum-core`
+
 v6 endpoints:
 
 - Prover: `POST /v6/runs`, `GET /v6/runs/{run_id}`
@@ -110,6 +114,8 @@ See [`docs/CI.md`](docs/CI.md) for the full CI matrix and local reproduction com
 
 - [`policy_packs/lending_risk_v1/policy_spec.yaml`](policy_packs/lending_risk_v1/policy_spec.yaml)
 - [`policy_packs/lending_risk_portfolio_v1/policy_spec.yaml`](policy_packs/lending_risk_portfolio_v1/policy_spec.yaml)
+
+Generated compiler outputs now include explainability trace metadata (`*.debug.json`) and support declarative `policy_parameters` references in DSL expressions.
 
 Generate artifacts from DSL:
 
