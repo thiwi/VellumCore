@@ -14,6 +14,8 @@ Validation checks:
 - max token lifetime (`JWT_MAX_TTL_SECONDS`)
 - scope enforcement per route (`proofs:write`, `proofs:read`, `audit:read`)
 - admin scope enforcement for DLQ operations (`ops:read`, `ops:write`)
+- dashboard API scope enforcement (`dashboard:read`, `dashboard:write`) when
+  `DASHBOARD_REQUIRE_AUTH=true` (default)
 
 ### 2) Bank request handshake (prover submit)
 
@@ -25,6 +27,8 @@ Validation checks:
 - Submit requests are rate-limited in Redis (`SUBMIT_RATE_LIMIT_PER_MINUTE`).
 - Submit request bodies are size-limited (`MAX_SUBMIT_BODY_BYTES`).
 - Dashboard demo proxy body is size-limited (`DASHBOARD_MAX_DEMO_PROVE_BODY_BYTES`).
+- Dashboard API auth can be temporarily bypassed only via
+  `DASHBOARD_REQUIRE_AUTH=false` (intended for local/e2e compatibility).
 
 ## Audit Integrity
 

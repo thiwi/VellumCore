@@ -5,16 +5,39 @@
 Start:
 
 ```bash
-./up_infra.sh
+./up_docker_infra.sh
 ```
 
 `framework-init` is executed automatically during compose startup to prepare artifacts.
 
+Local docker-compose defaults `DASHBOARD_REQUIRE_AUTH=false` so existing
+dashboard and E2E flows can call `/api/*` without client JWTs.
+For production-like local validation, set `DASHBOARD_REQUIRE_AUTH=true` and
+provide JWTs with `dashboard:read` / `dashboard:write` scopes.
+
 Stop:
 
 ```bash
-./down_infra.sh
+./down_docker_infra.sh
 ```
+
+Legacy wrappers `./up_infra.sh` and `./down_infra.sh` are still available but deprecated.
+
+## Minikube Lifecycle (Core Services)
+
+Start:
+
+```bash
+./up_minikube_infra.sh
+```
+
+Stop:
+
+```bash
+./down_minikube_infra.sh
+```
+
+Use `./down_minikube_infra.sh --help` for optional teardown flags (keep dependencies, stop profile, delete namespace).
 
 Health checks:
 

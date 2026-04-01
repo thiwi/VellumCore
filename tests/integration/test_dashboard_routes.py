@@ -8,7 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import dashboard_service
+from vellum_core.errors import APIError
 from vellum_core.logic.batcher import MAX_BATCH_SIZE
+
+
+@pytest.fixture(autouse=True)
+def _disable_dashboard_auth_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard_service.config, "dashboard_require_auth", False)
 
 
 @pytest.mark.integration
@@ -147,3 +153,127 @@ def test_demo_prove_rejects_mixed_input_modes() -> None:
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.integration
+def test_dashboard_api_requires_auth_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_health() -> dict[str, Any]:
+        return {"status": "ok", "components": {}}
+
+    async def fake_verify_jwt_credentials(
+        credentials: Any,
+        *,
+        required_scopes: set[str],
+    ) -> dict[str, str]:
+        _ = required_scopes
+        if credentials is None:
+            raise APIError(status_code=401, code="missing_token", message="Missing bearer token")
+        return {"sub": "demo-user"}
+
+    monkeypatch.setattr(dashboard_service.config, "dashboard_require_auth", True)
+    monkeypatch.setattr(dashboard_service, "_framework_health_snapshot", fake_health)
+    monkeypatch.setattr(
+        dashboard_service.dashboard_auth_manager,
+        "verify_jwt_credentials",
+        fake_verify_jwt_credentials,
+    )
+
+    client = TestClient(dashboard_service.app)
+    response = client.get("/api/framework/health")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "missing_token"
+
+
+@pytest.mark.integration
+def test_dashboard_api_rejects_insufficient_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_health() -> dict[str, Any]:
+        return {"status": "ok", "components": {}}
+
+    async def fake_verify_jwt_credentials(
+        credentials: Any,
+        *,
+        required_scopes: set[str],
+    ) -> dict[str, str]:
+        _ = required_scopes
+        if credentials is None or credentials.credentials != "good-read":
+            raise APIError(
+                status_code=403,
+                code="insufficient_scope",
+                message="JWT does not contain required scopes",
+            )
+        return {"sub": "demo-user"}
+
+    monkeypatch.setattr(dashboard_service.config, "dashboard_require_auth", True)
+    monkeypatch.setattr(dashboard_service, "_framework_health_snapshot", fake_health)
+    monkeypatch.setattr(
+        dashboard_service.dashboard_auth_manager,
+        "verify_jwt_credentials",
+        fake_verify_jwt_credentials,
+    )
+
+    client = TestClient(dashboard_service.app)
+    response = client.get(
+        "/api/framework/health",
+        headers={"Authorization": "Bearer not-enough"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "insufficient_scope"
+
+
+@pytest.mark.integration
+def test_dashboard_api_accepts_valid_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_health() -> dict[str, Any]:
+        return {"status": "ok", "components": {}}
+
+    async def fake_verify_jwt_credentials(
+        credentials: Any,
+        *,
+        required_scopes: set[str],
+    ) -> dict[str, str]:
+        _ = required_scopes
+        if credentials is None or credentials.credentials != "good-read":
+            raise APIError(
+                status_code=403,
+                code="insufficient_scope",
+                message="JWT does not contain required scopes",
+            )
+        return {"sub": "demo-user"}
+
+    monkeypatch.setattr(dashboard_service.config, "dashboard_require_auth", True)
+    monkeypatch.setattr(dashboard_service, "_framework_health_snapshot", fake_health)
+    monkeypatch.setattr(
+        dashboard_service.dashboard_auth_manager,
+        "verify_jwt_credentials",
+        fake_verify_jwt_credentials,
+    )
+
+    client = TestClient(dashboard_service.app)
+    response = client.get(
+        "/api/framework/health",
+        headers={"Authorization": "Bearer good-read"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+@pytest.mark.integration
+def test_dashboard_api_bypasses_auth_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_health() -> dict[str, Any]:
+        return {"status": "ok", "components": {}}
+
+    async def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, str]:
+        _ = (args, kwargs)
+        raise AssertionError("verify_jwt_credentials should not be called when dashboard auth is disabled")
+
+    monkeypatch.setattr(dashboard_service.config, "dashboard_require_auth", False)
+    monkeypatch.setattr(dashboard_service, "_framework_health_snapshot", fake_health)
+    monkeypatch.setattr(
+        dashboard_service.dashboard_auth_manager,
+        "verify_jwt_credentials",
+        fail_if_called,
+    )
+
+    client = TestClient(dashboard_service.app)
+    response = client.get("/api/framework/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"

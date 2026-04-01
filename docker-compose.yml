@@ -492,6 +492,9 @@ services:
       VELLUM_JWT_KEY: vellum-jwt
       VELLUM_BANK_KEY: vellum-bank
       SECURITY_PROFILE: dev
+      DASHBOARD_REQUIRE_AUTH: "false"
+      DASHBOARD_AUTH_READ_SCOPE: dashboard:read
+      DASHBOARD_AUTH_WRITE_SCOPE: dashboard:write
       DASHBOARD_MAX_DEMO_PROVE_BODY_BYTES: 1048576
       APP_NAME: vellum-dashboard
       LOG_LEVEL: INFO

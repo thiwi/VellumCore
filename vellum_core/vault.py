@@ -38,6 +38,7 @@ class VaultTransitClient:
         self.token = token
         self.timeout = timeout
         self._tls_verify: bool | str = tls_ca_bundle or True
+        self._client: httpx.AsyncClient | None = None
 
     async def sign(self, key_name: str, payload: bytes) -> VaultSignature:
         """Sign bytes with transit key and return structured signature data."""
@@ -82,10 +83,22 @@ class VaultTransitClient:
     async def _request(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Execute an authenticated Vault HTTP request and decode JSON body."""
         headers = {"X-Vault-Token": self.token}
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self._tls_verify) as client:
-            response = await client.request(method, f"{self.addr}{path}", headers=headers, json=json)
+        client = self._client
+        if client is None or client.is_closed:
+            client = httpx.AsyncClient(timeout=self.timeout, verify=self._tls_verify)
+            self._client = client
+        response = await client.request(method, f"{self.addr}{path}", headers=headers, json=json)
         response.raise_for_status()
         return response.json()
+
+    async def aclose(self) -> None:
+        """Close shared HTTP client used by this Vault client."""
+        client = self._client
+        if client is None:
+            return
+        self._client = None
+        if not client.is_closed:
+            await client.aclose()
 
     @staticmethod
     def decode_signature(signature: str) -> tuple[bytes, str]:

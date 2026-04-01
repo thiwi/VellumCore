@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -14,49 +13,16 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-try:
-    from vellum_core.auth import VaultJWTSigner, build_canonical_request_string
-except ModuleNotFoundError:  # pragma: no cover - optional dependency for lightweight test envs
-    class VaultJWTSigner:  # type: ignore[no-redef]
-        def __init__(
-            self,
-            *,
-            vault_client: "VaultTransitClient",
-            key_name: str,
-            issuer: str,
-            audience: str,
-        ) -> None:
-            _ = (vault_client, key_name, issuer, audience)
-
-        async def sign(
-            self,
-            *,
-            subject: str,
-            ttl_seconds: int = 3600,
-            scopes: set[str] | list[str] | tuple[str, ...] | None = None,
-        ) -> str:
-            _ = (subject, ttl_seconds, scopes)
-            return "dev-dashboard-token"
-
-    def build_canonical_request_string(
-        *,
-        method: str,
-        path: str,
-        timestamp: str,
-        nonce: str,
-        raw_body: bytes,
-    ) -> str:
-        body_hash = hashlib.sha256(raw_body).hexdigest()
-        return f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}"
-
+from vellum_core.auth import AuthManager, VaultJWTSigner, build_canonical_request_string
 from vellum_core.errors import APIError, register_exception_handlers
+from vellum_core.http_auth import build_optional_scoped_jwt_dependency
 from vellum_core.logic.batcher import MAX_BATCH_SIZE
 from vellum_core.observability import configure_logging, init_telemetry
-from vellum_core.vault import VaultTransitClient
+from vellum_core.vault import VaultPublicKeyCache, VaultTransitClient
 from vellum_core.versioning import HTTP_API_PREFIX, PACKAGE_VERSION
 
 
@@ -152,16 +118,45 @@ class DashboardConfig:
         self.vault_token = os.getenv("VAULT_TOKEN", "root")
         self.vault_jwt_key = os.getenv("VELLUM_JWT_KEY", "vellum-jwt")
         self.vault_bank_key = os.getenv("VELLUM_BANK_KEY", "vellum-bank")
+        self.vault_public_key_cache_ttl_seconds = int(
+            os.getenv("VAULT_PUBLIC_KEY_CACHE_TTL_SECONDS", "300")
+        )
         self.tls_ca_bundle = os.getenv("TLS_CA_BUNDLE")
+        self.redis_url = os.getenv("REDIS_URL", "redis://redis:6379/1")
+        self.nonce_window_seconds = int(os.getenv("NONCE_WINDOW_SECONDS", "300"))
+        self.jwt_max_ttl_seconds = max(1, int(os.getenv("JWT_MAX_TTL_SECONDS", "900")))
+        self.jwt_leeway_seconds = max(0, int(os.getenv("JWT_LEEWAY_SECONDS", "30")))
+        self.submit_rate_limit_per_minute = max(
+            0, int(os.getenv("SUBMIT_RATE_LIMIT_PER_MINUTE", "30"))
+        )
 
         self.redis_host = os.getenv("REDIS_HOST", "redis")
         self.redis_port = int(os.getenv("REDIS_PORT", "6379"))
         self.postgres_host = os.getenv("POSTGRES_HOST", "postgres")
         self.postgres_port = int(os.getenv("POSTGRES_PORT", "5432"))
+        self.dashboard_require_auth = _parse_bool_env("DASHBOARD_REQUIRE_AUTH", default=True)
+        self.dashboard_auth_read_scope = os.getenv(
+            "DASHBOARD_AUTH_READ_SCOPE", "dashboard:read"
+        )
+        self.dashboard_auth_write_scope = os.getenv(
+            "DASHBOARD_AUTH_WRITE_SCOPE", "dashboard:write"
+        )
         self.dashboard_max_demo_prove_body_bytes = max(
             1,
             int(os.getenv("DASHBOARD_MAX_DEMO_PROVE_BODY_BYTES", "1048576")),
         )
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
 
 config = DashboardConfig()
@@ -178,6 +173,24 @@ jwt_signer = VaultJWTSigner(
     issuer=config.jwt_issuer,
     audience=config.jwt_audience,
 )
+key_cache = VaultPublicKeyCache(
+    client=vault_client,
+    ttl_seconds=config.vault_public_key_cache_ttl_seconds,
+)
+dashboard_auth_manager = AuthManager(
+    vault_client=vault_client,
+    key_cache=key_cache,
+    jwt_key_name=config.vault_jwt_key,
+    jwt_issuer=config.jwt_issuer,
+    jwt_audience=config.jwt_audience,
+    bank_key_mapping={config.bank_key_id: config.vault_bank_key},
+    redis_url=config.redis_url,
+    nonce_window_seconds=config.nonce_window_seconds,
+    jwt_max_ttl_seconds=config.jwt_max_ttl_seconds,
+    jwt_leeway_seconds=config.jwt_leeway_seconds,
+    submit_rate_limit_per_minute=config.submit_rate_limit_per_minute,
+    security_event_recorder=None,
+)
 
 app = FastAPI(title="Vellum Framework Console", version=PACKAGE_VERSION)
 register_exception_handlers(app)
@@ -187,14 +200,121 @@ init_telemetry(
     instrument_httpx=True,
 )
 
+_shared_http_client: httpx.AsyncClient | None = None
+
+
+class _DashboardJWTCache:
+    """Cache dashboard upstream JWTs to avoid Vault signing per request."""
+
+    def __init__(
+        self,
+        *,
+        signer: VaultJWTSigner,
+        subject: str,
+        scopes: set[str],
+        ttl_seconds: int,
+        refresh_skew_seconds: int = 60,
+    ) -> None:
+        self.signer = signer
+        self.subject = subject
+        self.scopes = scopes
+        self.ttl_seconds = ttl_seconds
+        self.refresh_skew_seconds = refresh_skew_seconds
+        self._token: str | None = None
+        self._expires_at_epoch = 0.0
+        self._lock = asyncio.Lock()
+
+    async def get_token(self) -> str:
+        now = time.time()
+        if self._token is not None and now < (self._expires_at_epoch - self.refresh_skew_seconds):
+            return self._token
+
+        async with self._lock:
+            now = time.time()
+            if self._token is not None and now < (self._expires_at_epoch - self.refresh_skew_seconds):
+                return self._token
+            token = await self.signer.sign(
+                subject=self.subject,
+                ttl_seconds=self.ttl_seconds,
+                scopes=self.scopes,
+            )
+            self._token = token
+            self._expires_at_epoch = now + self.ttl_seconds
+            return token
+
+
+_UPSTREAM_JWT_TTL_SECONDS = 600
+_upstream_jwt_cache = _DashboardJWTCache(
+    signer=jwt_signer,
+    subject="dashboard-demo-user",
+    scopes={"proofs:write", "proofs:read", "audit:read", "ops:read", "ops:write"},
+    ttl_seconds=_UPSTREAM_JWT_TTL_SECONDS,
+    refresh_skew_seconds=60,
+)
+
 
 async def _jwt_token() -> str:
     """Mint dashboard-internal bearer token for upstream service calls."""
-    return await jwt_signer.sign(
-        subject="dashboard-demo-user",
-        ttl_seconds=600,
-        scopes={"proofs:write", "proofs:read", "audit:read", "ops:read", "ops:write"},
+    return await _upstream_jwt_cache.get_token()
+
+
+async def _get_shared_http_client() -> httpx.AsyncClient:
+    """Return singleton async HTTP client for dashboard upstream traffic."""
+    global _shared_http_client
+    client = _shared_http_client
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient()
+        _shared_http_client = client
+    return client
+
+
+async def _close_shared_http_client() -> None:
+    """Close singleton dashboard HTTP client if initialized."""
+    global _shared_http_client
+    client = _shared_http_client
+    _shared_http_client = None
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
+
+def _dashboard_auth_enabled() -> bool:
+    return config.dashboard_require_auth
+
+
+def require_dashboard_read_scope():
+    """Build optional dashboard route guard for read-only API routes."""
+    return build_optional_scoped_jwt_dependency(
+        dashboard_auth_manager,
+        config.dashboard_auth_read_scope,
+        enabled=_dashboard_auth_enabled,
     )
+
+
+def require_dashboard_write_scope():
+    """Build optional dashboard route guard for mutating API routes."""
+    return build_optional_scoped_jwt_dependency(
+        dashboard_auth_manager,
+        config.dashboard_auth_write_scope,
+        enabled=_dashboard_auth_enabled,
+    )
+
+
+async def _upstream_bearer_headers() -> dict[str, str]:
+    token = await _jwt_token()
+    return {"Authorization": f"Bearer {token}"}
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Initialize shared dashboard clients."""
+    await _get_shared_http_client()
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Release dashboard network clients."""
+    await _close_shared_http_client()
+    await vault_client.aclose()
 
 
 async def _handshake_headers(method: str, path: str, body: bytes) -> dict[str, str]:
@@ -261,8 +381,8 @@ async def _proxy_get_json(
     params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Issue one upstream GET and return parsed JSON with normalized error handling."""
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.get(url, headers=headers, params=params)
+    client = await _get_shared_http_client()
+    response = await client.get(url, headers=headers, params=params, timeout=timeout)
     if response.status_code != 200:
         raise _upstream_error(service, response)
     return response.json()
@@ -278,8 +398,8 @@ async def _proxy_post_json(
     expected_status: int = 200,
 ) -> dict[str, Any]:
     """Issue one upstream JSON POST and return parsed JSON with normalized error handling."""
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(url, headers=headers, content=content)
+    client = await _get_shared_http_client()
+    response = await client.post(url, headers=headers, content=content, timeout=timeout)
     if response.status_code != expected_status:
         raise _upstream_error(service, response)
     return response.json()
@@ -288,8 +408,8 @@ async def _proxy_post_json(
 async def _http_status(name: str, url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
     """Collect one HTTP-based component health check result."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(url, headers=headers)
+        client = await _get_shared_http_client()
+        response = await client.get(url, headers=headers, timeout=5.0)
         return {
             "component": name,
             "ok": response.status_code < 400,
@@ -323,8 +443,7 @@ async def _tcp_status(name: str, host: str, port: int) -> dict[str, Any]:
 
 async def _framework_health_snapshot() -> dict[str, Any]:
     """Aggregate health state for core framework dependencies."""
-    token = await _jwt_token()
-    auth_headers = {"Authorization": f"Bearer {token}"}
+    auth_headers = await _upstream_bearer_headers()
     vault_headers = {"X-Vault-Token": config.vault_token}
 
     checks = await asyncio.gather(
@@ -364,7 +483,6 @@ async def _list_proofs(
     limit: int = 50,
 ) -> dict[str, Any]:
     """Fetch job list from prover service with optional filters."""
-    token = await _jwt_token()
     params = {
         "limit": str(min(max(limit, 1), 200)),
     }
@@ -376,7 +494,7 @@ async def _list_proofs(
     return await _proxy_get_json(
         service="prover",
         url=f"{config.prover_url}{HTTP_API_PREFIX}/proofs",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
         params=params,
     )
 
@@ -1207,19 +1325,25 @@ async def healthz() -> dict[str, str]:
 
 
 @app.get("/api/circuits")
-async def list_circuits() -> dict[str, Any]:
+async def list_circuits(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Return local manifest list from mounted circuits directory."""
     return {"circuits": _load_circuits()}
 
 
 @app.get("/api/framework/health")
-async def framework_health() -> dict[str, Any]:
+async def framework_health(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Return aggregated dependency health snapshot."""
     return await _framework_health_snapshot()
 
 
 @app.get("/api/framework/diagnostics")
-async def framework_diagnostics() -> dict[str, Any]:
+async def framework_diagnostics(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Return degraded component subset for troubleshooting."""
     snapshot = await _framework_health_snapshot()
     failed = {
@@ -1235,7 +1359,9 @@ async def framework_diagnostics() -> dict[str, Any]:
 
 
 @app.get("/api/framework/overview")
-async def framework_overview() -> dict[str, Any]:
+async def framework_overview(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Return cockpit header aggregate: health, trust-speed, and recent job stats."""
     health, trust, jobs_payload = await asyncio.gather(
         _framework_health_snapshot(),
@@ -1278,31 +1404,36 @@ async def framework_overview() -> dict[str, Any]:
 
 
 @app.get("/api/framework/circuits")
-async def framework_circuits() -> dict[str, Any]:
+async def framework_circuits(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Proxy verifier circuit status endpoint."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/circuits"
     return await _proxy_get_json(
         service="verifier",
         url=f"{config.verifier_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
     )
 
 
 @app.get("/api/framework/audit-chain")
-async def framework_audit_chain() -> dict[str, Any]:
+async def framework_audit_chain(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Proxy verifier audit integrity endpoint."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/audit/verify-chain"
     return await _proxy_get_json(
         service="verifier",
         url=f"{config.verifier_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
     )
 
 
 @app.post("/api/demo/prove")
-async def demo_prove(request: Request) -> dict[str, Any]:
+async def demo_prove(
+    request: Request,
+    _: dict[str, Any] | None = Depends(require_dashboard_write_scope()),
+) -> dict[str, Any]:
     """Proxy prove submission with dashboard-minted auth and handshake headers."""
     raw_body = await request.body()
     if len(raw_body) > config.dashboard_max_demo_prove_body_bytes:
@@ -1328,10 +1459,9 @@ async def demo_prove(request: Request) -> dict[str, Any]:
         ) from exc
 
     body = payload.model_dump_json(exclude_none=True).encode("utf-8")
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/proofs/batch"
     headers = {
-        "Authorization": f"Bearer {token}",
+        **(await _upstream_bearer_headers()),
         "Content-Type": "application/json",
         **(await _handshake_headers("POST", path, body)),
     }
@@ -1345,19 +1475,22 @@ async def demo_prove(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/demo/proofs/{proof_id}")
-async def demo_proof_status(proof_id: str) -> dict[str, Any]:
+async def demo_proof_status(
+    proof_id: str,
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Proxy single proof status lookup from prover service."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/proofs/{proof_id}"
     return await _proxy_get_json(
         service="prover",
         url=f"{config.prover_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
     )
 
 
 @app.get("/api/demo/proofs")
 async def demo_list_proofs(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
     status: str | None = Query(default=None),
     circuit_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -1371,11 +1504,13 @@ async def demo_list_proofs(
 
 
 @app.post("/api/demo/verify")
-async def demo_verify(payload: DemoVerifyRequest) -> dict[str, Any]:
+async def demo_verify(
+    payload: DemoVerifyRequest,
+    _: dict[str, Any] | None = Depends(require_dashboard_write_scope()),
+) -> dict[str, Any]:
     """Proxy verifier proof-check endpoint."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/verify"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = {**(await _upstream_bearer_headers()), "Content-Type": "application/json"}
     return await _proxy_post_json(
         service="verifier",
         url=f"{config.verifier_url}{path}",
@@ -1385,25 +1520,28 @@ async def demo_verify(payload: DemoVerifyRequest) -> dict[str, Any]:
 
 
 @app.get("/api/trust-speed")
-async def demo_trust_speed() -> dict[str, Any]:
+async def demo_trust_speed(
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Proxy trust-speed snapshot endpoint from verifier service."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/trust-speed"
     return await _proxy_get_json(
         service="verifier",
         url=f"{config.verifier_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
     )
 
 
 @app.post("/api/v6/runs")
-async def demo_policy_run(payload: DemoPolicyRunRequest) -> dict[str, Any]:
+async def demo_policy_run(
+    payload: DemoPolicyRunRequest,
+    _: dict[str, Any] | None = Depends(require_dashboard_write_scope()),
+) -> dict[str, Any]:
     """Proxy v6 run creation endpoint."""
     body = json.dumps(payload.to_v6_payload(), separators=(",", ":")).encode("utf-8")
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/runs"
     headers = {
-        "Authorization": f"Bearer {token}",
+        **(await _upstream_bearer_headers()),
         "Content-Type": "application/json",
         **(await _handshake_headers("POST", path, body)),
     }
@@ -1417,26 +1555,30 @@ async def demo_policy_run(payload: DemoPolicyRunRequest) -> dict[str, Any]:
 
 
 @app.get("/api/v6/runs/{run_id}")
-async def demo_policy_run_status(run_id: str) -> dict[str, Any]:
+async def demo_policy_run_status(
+    run_id: str,
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Proxy v6 run status endpoint."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/runs/{run_id}"
     return await _proxy_get_json(
         service="prover",
         url=f"{config.prover_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
     )
 
 
 @app.get("/api/v6/runs/{run_id}/attestation")
-async def demo_attestation_export(run_id: str) -> dict[str, Any]:
+async def demo_attestation_export(
+    run_id: str,
+    _: dict[str, Any] | None = Depends(require_dashboard_read_scope()),
+) -> dict[str, Any]:
     """Proxy v6 attestation export endpoint."""
-    token = await _jwt_token()
     path = f"{HTTP_API_PREFIX}/runs/{run_id}/attestation"
     return await _proxy_get_json(
         service="verifier",
         url=f"{config.verifier_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=await _upstream_bearer_headers(),
     )
 
 

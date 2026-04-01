@@ -8,15 +8,17 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import Response
-from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, ValidationError
 
 from vellum_core.api.errors import FrameworkError
-from vellum_core.auth import AuthManager, BEARER_SCHEME
+from vellum_core.auth import AuthManager
 from vellum_core.config import Settings
 from vellum_core.database import Database
 from vellum_core.errors import APIError, register_exception_handlers
-from vellum_core.http_auth import build_scoped_jwt_dependency
+from vellum_core.http_auth import (
+    build_optional_scoped_jwt_dependency,
+    build_required_scoped_jwt_dependency,
+)
 from vellum_core.logic.batcher import MAX_BATCH_SIZE, batch_prepare_input
 from vellum_core.logic.private_input_schema import validate_private_input_schema
 from vellum_core.metrics import prometheus_payload
@@ -109,9 +111,22 @@ async def startup_event() -> None:
     await db.init_models()
 
 
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Close long-lived network clients."""
+    await vault_client.aclose()
+
+
 def require_jwt_with_scopes(*scopes: str):
     """Build a JWT dependency that enforces one set of required scopes."""
-    return build_scoped_jwt_dependency(auth_manager, *scopes)
+    return build_required_scoped_jwt_dependency(auth_manager, *scopes)
+
+
+require_metrics_auth = build_optional_scoped_jwt_dependency(
+    auth_manager,
+    "proofs:read",
+    enabled=settings.metrics_require_auth,
+)
 
 
 async def _decode_and_authenticate(request: Request) -> tuple[BatchProveRequest, str]:
@@ -358,14 +373,9 @@ async def healthcheck() -> HealthResponse:
 
 @app.get("/metrics")
 async def metrics(
-    credentials: HTTPAuthorizationCredentials | None = Depends(BEARER_SCHEME),
+    _: dict[str, Any] | None = Depends(require_metrics_auth),
 ) -> Response:
     """Prometheus metrics endpoint."""
-    if settings.metrics_require_auth:
-        await auth_manager.verify_jwt_credentials(
-            credentials,
-            required_scopes={"proofs:read"},
-        )
     payload, content_type = prometheus_payload()
     return Response(content=payload, media_type=content_type)
 
