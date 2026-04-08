@@ -16,6 +16,11 @@ import httpx
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 RUN_E2E = os.getenv("RUN_E2E", "0") == "1"
+TRANSIENT_COMPOSE_FAILURE_PATTERNS = (
+    "dependency failed to start",
+    "is unhealthy",
+)
+COMPOSE_RETRY_DELAY_SECONDS = 5
 
 pytestmark = [pytest.mark.e2e]
 if not RUN_E2E:
@@ -25,20 +30,76 @@ if not RUN_E2E:
 @pytest.fixture(scope="module")
 def compose_stack() -> None:
     _compose("down", "--remove-orphans")
-    _compose("up", "--build", "-d")
+    _compose_up_with_retry(max_attempts=2)
     _wait_http("http://localhost:8000/healthz", timeout=240)
     yield
     _compose("down", "--remove-orphans")
 
 
-def _compose(*args: str) -> None:
+def _compose(
+    *args: str,
+    check: bool = True,
+    capture_output: bool = False,
+) -> subprocess.CompletedProcess[str]:
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), *args]
-    subprocess.run(cmd, check=True)
+    return subprocess.run(
+        cmd,
+        check=check,
+        capture_output=capture_output,
+        text=True,
+    )
 
 
 def _compose_capture(*args: str) -> subprocess.CompletedProcess[str]:
-    cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), *args]
-    return subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return _compose(*args, check=True, capture_output=True)
+
+
+def _compose_up_with_retry(*, max_attempts: int) -> None:
+    for attempt in range(1, max_attempts + 1):
+        result = _compose("up", "--build", "-d", check=False, capture_output=True)
+        _echo_compose_output(result)
+        if result.returncode == 0:
+            return
+
+        _emit_compose_diagnostics()
+        full_output = f"{result.stdout}\n{result.stderr}".lower()
+        if attempt >= max_attempts or not _is_transient_compose_failure(full_output):
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                result.args,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+
+        _compose("down", "--remove-orphans", check=False)
+        time.sleep(COMPOSE_RETRY_DELAY_SECONDS)
+
+
+def _echo_compose_output(result: subprocess.CompletedProcess[str]) -> None:
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="")
+
+
+def _is_transient_compose_failure(output: str) -> bool:
+    return any(pattern in output for pattern in TRANSIENT_COMPOSE_FAILURE_PATTERNS)
+
+
+def _emit_compose_diagnostics() -> None:
+    _compose("ps", "-a", check=False)
+    _compose(
+        "logs",
+        "--no-color",
+        "--tail",
+        "200",
+        "prover",
+        "verifier",
+        "dashboard",
+        "worker",
+        "native-prover",
+        check=False,
+    )
 
 
 def _wait_http(url: str, timeout: int = 120) -> None:
